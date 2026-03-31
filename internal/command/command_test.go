@@ -24,7 +24,7 @@ func TestFocusJSON_PreservesSettings(t *testing.T) {
 		{Name: "repo-b"},
 	}
 
-	out, err := FocusJSON([]byte(input), repos)
+	out, err := FocusJSON([]byte(input), repos, "..")
 	require.NoError(t, err)
 
 	var ws map[string]interface{}
@@ -53,7 +53,7 @@ func TestFocusJSON_PreservesSettings(t *testing.T) {
 func TestFocusJSON_EmptyRepos(t *testing.T) {
 	input := `{"folders": [{"name": "~ workspace", "path": "."}], "settings": {}}`
 
-	out, err := FocusJSON([]byte(input), nil)
+	out, err := FocusJSON([]byte(input), nil, "..")
 	require.NoError(t, err)
 
 	var ws map[string]interface{}

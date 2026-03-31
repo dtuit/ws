@@ -38,23 +38,29 @@ func main() {
 		fatal(err)
 	}
 
-	parentDir := filepath.Dir(wsHome)
+	parentDir := m.ResolveRoot(wsHome)
+
+	// Context: use as default filter when no explicit filter is given
+	ctx := command.GetContext(wsHome)
 
 	switch cmd {
-	case "setup":
-		filter := ""
+	case "context":
 		if len(args) > 0 {
-			filter = args[0]
+			if err := command.SetContext(m, wsHome, args[0]); err != nil {
+				fatal(err)
+			}
+		} else {
+			command.ShowContext(m, wsHome)
 		}
+
+	case "setup":
+		filter := filterArg(args, ctx)
 		if err := command.Setup(m, parentDir, filter); err != nil {
 			fatal(err)
 		}
 
 	case "focus":
-		filter := ""
-		if len(args) > 0 {
-			filter = args[0]
-		}
+		filter := filterArg(args, ctx)
 		if err := command.Focus(m, parentDir, wsHome, filter); err != nil {
 			fatal(err)
 		}
@@ -71,16 +77,16 @@ func main() {
 		}
 
 	case "ll":
-		filter := ""
-		if len(args) > 0 {
-			filter = args[0]
-		}
+		filter := filterArg(args, ctx)
 		if err := command.LL(m, parentDir, filter); err != nil {
 			fatal(err)
 		}
 
 	case "super":
 		filter, cmdArgs := command.ParseSuperArgs(m, args)
+		if filter == "" {
+			filter = ctx
+		}
 		if len(cmdArgs) == 0 {
 			fmt.Fprintln(os.Stderr, "Usage: ws super [filter] <command...>")
 			os.Exit(1)
@@ -90,19 +96,13 @@ func main() {
 		}
 
 	case "fetch":
-		filter := ""
-		if len(args) > 0 {
-			filter = args[0]
-		}
+		filter := filterArg(args, ctx)
 		if err := command.Super(m, parentDir, filter, []string{"git", "fetch"}); err != nil {
 			fatal(err)
 		}
 
 	case "pull":
-		filter := ""
-		if len(args) > 0 {
-			filter = args[0]
-		}
+		filter := filterArg(args, ctx)
 		if err := command.Super(m, parentDir, filter, []string{"git", "pull"}); err != nil {
 			fatal(err)
 		}
@@ -112,6 +112,17 @@ func main() {
 		usage()
 		os.Exit(1)
 	}
+}
+
+// filterArg returns the explicit filter if given, otherwise falls back to context.
+func filterArg(args []string, ctx string) string {
+	if len(args) > 0 {
+		return args[0]
+	}
+	if ctx != "" {
+		return ctx
+	}
+	return ""
 }
 
 func findWorkspaceHome() (string, error) {
@@ -157,6 +168,7 @@ Commands:
   super [filter] <cmd>   Run command across repos
   fetch [filter]         Fetch all repos (sugar for: super git fetch)
   pull [filter]          Pull all repos (sugar for: super git pull)
+  context [filter]       Set default filter for all commands (no arg = show, "none" = clear)
 
 Filters:
   all                    All repos in any group (default)

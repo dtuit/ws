@@ -35,11 +35,17 @@ func Focus(m *manifest.Manifest, parentDir, wsHome, filter string) error {
 		return fmt.Errorf("workspace file has no folders")
 	}
 
+	// Compute relative path prefix from workspace dir to repo root
+	relRoot, err := filepath.Rel(wsHome, parentDir)
+	if err != nil {
+		relRoot = parentDir // fallback to absolute
+	}
+
 	newFolders := []interface{}{folders[0]}
 	for _, repo := range repos {
 		newFolders = append(newFolders, map[string]interface{}{
 			"name": repo.Name,
-			"path": "../" + repo.Name,
+			"path": filepath.Join(relRoot, repo.Name),
 		})
 	}
 	ws["folders"] = newFolders
@@ -81,7 +87,7 @@ func findWorkspaceFile(dir string) (string, error) {
 }
 
 // FocusJSON is exported for testing - applies focus transformation to workspace JSON.
-func FocusJSON(data []byte, repos []manifest.RepoInfo) ([]byte, error) {
+func FocusJSON(data []byte, repos []manifest.RepoInfo, relRoot string) ([]byte, error) {
 	var ws map[string]interface{}
 	if err := json.Unmarshal(data, &ws); err != nil {
 		return nil, err
@@ -96,7 +102,7 @@ func FocusJSON(data []byte, repos []manifest.RepoInfo) ([]byte, error) {
 	for _, repo := range repos {
 		newFolders = append(newFolders, map[string]interface{}{
 			"name": repo.Name,
-			"path": "../" + repo.Name,
+			"path": filepath.Join(relRoot, repo.Name),
 		})
 	}
 	ws["folders"] = newFolders

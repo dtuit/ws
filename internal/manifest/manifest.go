@@ -12,6 +12,7 @@ import (
 
 // Manifest is the parsed workspace manifest.
 type Manifest struct {
+	Root          string              // directory where repos live, relative to manifest dir (default "..")
 	Remotes       map[string]string   // name → URL prefix ("default" is the fallback)
 	DefaultBranch string              // default branch for all repos
 	Groups        map[string][]string // group name → ordered repo names
@@ -36,6 +37,7 @@ type RepoInfo struct {
 
 // rawManifest is the YAML deserialization target.
 type rawManifest struct {
+	Root    string                       `yaml:"root"`    // where repos live (default "..")
 	Remote  string                       `yaml:"remote"`  // backward compat: singular
 	Remotes map[string]string            `yaml:"remotes"` // named remotes
 	Branch  string                       `yaml:"branch"`
@@ -70,6 +72,7 @@ func Parse(data []byte) (*Manifest, error) {
 	}
 
 	m := &Manifest{
+		Root:          raw.Root,
 		Remotes:       make(map[string]string),
 		DefaultBranch: raw.Branch,
 		Groups:        raw.Groups,
@@ -77,6 +80,9 @@ func Parse(data []byte) (*Manifest, error) {
 		Exclude:       raw.Exclude,
 	}
 
+	if m.Root == "" {
+		m.Root = ".."
+	}
 	if m.DefaultBranch == "" {
 		m.DefaultBranch = "master"
 	}
@@ -155,6 +161,11 @@ func (m *Manifest) MergeLocal(path string) error {
 		return err
 	}
 
+	// Root: local overrides if explicitly set (not the default "..")
+	if local.Root != ".." {
+		m.Root = local.Root
+	}
+
 	// Remotes: union, local wins on conflict
 	for name, url := range local.Remotes {
 		m.Remotes[name] = url
@@ -198,6 +209,15 @@ func (m *Manifest) ResolveURL(name string, cfg RepoConfig) string {
 		prefix = m.Remotes["default"]
 	}
 	return prefix + "/" + name + ".git"
+}
+
+// ResolveRoot returns the absolute path where repos live.
+// If Root is relative, it's resolved against wsHome (the manifest directory).
+func (m *Manifest) ResolveRoot(wsHome string) string {
+	if filepath.IsAbs(m.Root) {
+		return m.Root
+	}
+	return filepath.Join(wsHome, m.Root)
 }
 
 // ValidateURL checks that a URL uses a safe git transport scheme.
