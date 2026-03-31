@@ -83,7 +83,7 @@ func Parse(data []byte) (*Manifest, error) {
 		m.Remotes[name] = url
 	}
 
-	// Repos: handle nil values (bare YAML entries like "xtracta-app:")
+	// Repos: handle nil values (bare YAML entries like "my-repo:")
 	for name, cfg := range raw.Repos {
 		rc := RepoConfig{}
 		if cfg != nil {

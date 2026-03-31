@@ -19,7 +19,7 @@ git clone git@github.com:dtuit/ws.git && cd ws && make install
 Point `ws` at your workspace (the directory containing `manifest.yml`):
 
 ```bash
-export WS_HOME=/path/to/xtracta-workspace
+export WS_HOME=/path/to/my-workspace
 ```
 
 Or just run `ws` from within the workspace directory - it walks up to find `manifest.yml`.
@@ -36,7 +36,7 @@ ws focus [filter]         Filter VS Code workspace folders
 ws list [--all]           Show manifest repos with status
 ```
 
-**Filters:** `all` (default), group name (`ai`), comma-separated (`ai,db`), or a repo name (`mmdoc`).
+**Filters:** `all` (default), group name (`backend`), comma-separated (`backend,infra`), or a repo name (`api-server`).
 
 ## Manifest
 
@@ -44,23 +44,23 @@ ws list [--all]           Show manifest repos with status
 
 ```yaml
 remotes:
-  default: git@bitbucket.org:xtracta
-  github: git@github.com:some-org
+  default: git@github.com:acme-corp
+  upstream: git@github.com:open-source-org
 
-branch: master
+branch: main
 
 groups:
-  ai:  [ai-data-api, ai-gateway, mmdoc]
-  eng: [global-auth, xtracta-app]
+  backend: [api-server, auth-service, worker]
+  frontend: [web-app, admin-dashboard]
 
 repos:
-  xtracta-app:                              # default remote + branch
-  ai-data-api: { branch: main }            # override branch
-  some-fork: { remote: github }            # use named remote
-  custom: { url: git@host:org/repo.git }   # full URL
+  api-server:                               # default remote + branch
+  auth-service: { branch: develop }         # override branch
+  web-app: { remote: upstream }             # use named remote
+  custom: { url: git@host:org/repo.git }    # full URL
 
 exclude:
-  - old-repo
+  - legacy-api
 ```
 
 ## Local Overrides
@@ -69,14 +69,14 @@ Create `manifest.local.yml` (gitignored) for personal customization:
 
 ```yaml
 repos:
-  smartocr:                                  # un-exclude a repo
+  legacy-api:                                # un-exclude a repo
   my-fork: { remote: my-remote, branch: dev }
 
 exclude:
   - repo-i-dont-need
 
 groups:
-  my-project: [repo-a, repo-b]
+  my-project: [api-server, my-fork]
 ```
 
 Merge rules: local repos/remotes/groups are added (same name = local wins). A repo in local `repos:` is active even if excluded in the main manifest.
