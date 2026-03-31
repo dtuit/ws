@@ -108,9 +108,22 @@ func main() {
 		}
 
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", cmd)
-		usage()
-		os.Exit(1)
+		// Unknown command: treat as passthrough to super
+		// e.g. "ws git status" -> super(all, ["git", "status"])
+		// e.g. "ws ai git status" -> super("ai", ["git", "status"])
+		allArgs := append([]string{cmd}, args...)
+		filter, cmdArgs := command.ParseSuperArgs(m, allArgs)
+		if filter == "" {
+			filter = ctx
+		}
+		if len(cmdArgs) == 0 {
+			fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", cmd)
+			usage()
+			os.Exit(1)
+		}
+		if err := command.Super(m, parentDir, filter, cmdArgs); err != nil {
+			fatal(err)
+		}
 	}
 }
 
@@ -161,14 +174,18 @@ func usage() {
 	fmt.Print(`Usage: ws <command> [args]
 
 Commands:
-  setup [filter]         Clone missing repos (default: all groups)
+  ll [filter]            Dashboard: branch, dirty, last commit
+  setup [filter]         Clone missing repos
   focus [filter]         Filter VS Code workspace folders
   list [--all]           Show repos in manifest (--all includes excluded)
-  ll [filter]            Dashboard: branch, dirty, last commit
-  super [filter] <cmd>   Run command across repos
-  fetch [filter]         Fetch all repos (sugar for: super git fetch)
-  pull [filter]          Pull all repos (sugar for: super git pull)
-  context [filter]       Set default filter for all commands (no arg = show, "none" = clear)
+  fetch [filter]         Fetch all repos
+  pull [filter]          Pull all repos
+  context [filter]       Set default filter (no arg = show, "none" = clear)
+
+Any unrecognized command is run across repos:
+  ws git status          Run "git status" in all repos
+  ws ai git log -1       Run "git log -1" in AI repos
+  ws ls -la              Run any command, not just git
 
 Filters:
   all                    All repos in any group (default)
