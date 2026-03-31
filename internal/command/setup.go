@@ -4,14 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/dtuit/ws/internal/git"
 	"github.com/dtuit/ws/internal/manifest"
 )
 
-// Setup clones missing repos and configures the shell.
+// Setup clones missing repos and prints shell setup instructions.
 func Setup(m *manifest.Manifest, parentDir, wsHome, filter string) error {
 	repos := m.ResolveFilter(filter)
 	if len(repos) == 0 {
@@ -51,78 +49,14 @@ func Setup(m *manifest.Manifest, parentDir, wsHome, filter string) error {
 	}
 	fmt.Printf("Setup complete: %d repo(s) on disk.\n", total)
 
-	// Configure shell
-	if err := installShellInit(wsHome); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not update shell config: %v\n", err)
+	// Print shell setup hint if not already configured
+	if os.Getenv("WS_HOME") == "" {
+		fmt.Printf("\nAdd to your shell config (~/.bashrc or ~/.zshrc):\n\n")
+		fmt.Printf("  # BEGIN ws\n")
+		fmt.Printf("  export WS_HOME=%q\n", wsHome)
+		fmt.Printf("  eval \"$(ws init)\"\n")
+		fmt.Printf("  # END ws\n\n")
 	}
 
 	return nil
-}
-
-const shellMarkerBegin = "# BEGIN ws"
-const shellMarkerEnd = "# END ws"
-
-func shellBlock(wsHome string) string {
-	return fmt.Sprintf(`%s
-export WS_HOME=%q
-ws() {
-  case "$1" in
-    cd)
-      local dir
-      dir="$(command ws cd "${@:2}")" && cd "$dir"
-      ;;
-    *)
-      command ws "$@"
-      ;;
-  esac
-}
-%s`, shellMarkerBegin, wsHome, shellMarkerEnd)
-}
-
-func installShellInit(wsHome string) error {
-	rcFile := shellRCPath()
-	if rcFile == "" {
-		return nil
-	}
-
-	block := shellBlock(wsHome)
-
-	content := ""
-	if data, err := os.ReadFile(rcFile); err == nil {
-		content = string(data)
-	}
-
-	// Check if block already exists and is current
-	re := regexp.MustCompile(`(?s)` + regexp.QuoteMeta(shellMarkerBegin) + `.*?` + regexp.QuoteMeta(shellMarkerEnd))
-	if re.MatchString(content) {
-		existing := re.FindString(content)
-		if existing == block {
-			return nil // already up to date
-		}
-		// Replace existing block
-		content = re.ReplaceAllString(content, block)
-		fmt.Printf("Updated shell config in %s\n", rcFile)
-	} else {
-		// Append new block
-		if !strings.HasSuffix(content, "\n") && content != "" {
-			content += "\n"
-		}
-		content += "\n" + block + "\n"
-		fmt.Printf("Added shell config to %s\n", rcFile)
-	}
-
-	return os.WriteFile(rcFile, []byte(content), 0644)
-}
-
-func shellRCPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	// Prefer zshrc if zsh is the shell, otherwise bashrc
-	shell := os.Getenv("SHELL")
-	if strings.Contains(shell, "zsh") {
-		return filepath.Join(home, ".zshrc")
-	}
-	return filepath.Join(home, ".bashrc")
 }
