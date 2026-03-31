@@ -207,12 +207,15 @@ func StatusAll(parentDir string, repos []manifest.RepoInfo, maxWorkers int) []Re
 }
 
 // Exec runs a command in each repo dir in parallel, printing prefixed output
-// as each repo completes. Returns the number of repos that failed.
+// as each repo completes. Shows a progress counter for silent commands.
+// Returns the number of repos that failed.
 func Exec(parentDir string, repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int) int {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, maxWorkers)
 	failCount := 0
+	done := 0
+	total := len(repos)
 
 	// Calculate max name length for alignment
 	maxName := 0
@@ -228,6 +231,10 @@ func Exec(parentDir string, repos []manifest.RepoInfo, cmdArgs []string, maxWork
 		"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
 	)
 
+	// Detect if stdout is a TTY for progress display
+	fi, _ := os.Stdout.Stat()
+	isTTY := fi != nil && fi.Mode()&os.ModeCharDevice != 0
+
 	for _, repo := range repos {
 		wg.Add(1)
 		go func(r manifest.RepoInfo) {
@@ -241,6 +248,7 @@ func Exec(parentDir string, repos []manifest.RepoInfo, cmdArgs []string, maxWork
 			if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
 				mu.Lock()
 				fmt.Fprintf(os.Stderr, "%sskipped (not cloned)\n", prefix)
+				done++
 				mu.Unlock()
 				return
 			}
@@ -254,13 +262,23 @@ func Exec(parentDir string, repos []manifest.RepoInfo, cmdArgs []string, maxWork
 			mu.Lock()
 			defer mu.Unlock()
 
+			done++
 			text := strings.TrimRight(string(output), "\n")
 			if text != "" {
+				if isTTY {
+					fmt.Print("\r\033[K") // clear progress line
+				}
 				for _, line := range strings.Split(text, "\n") {
 					fmt.Println(prefix + line)
 				}
+			} else if isTTY {
+				// No output - show progress counter
+				fmt.Fprintf(os.Stderr, "\r\033[K%s done (%d/%d)", r.Name, done, total)
 			}
 			if err != nil {
+				if isTTY {
+					fmt.Print("\r\033[K")
+				}
 				fmt.Fprintf(os.Stderr, "%sfailed: %v\n", prefix, err)
 				failCount++
 			}
@@ -268,6 +286,9 @@ func Exec(parentDir string, repos []manifest.RepoInfo, cmdArgs []string, maxWork
 	}
 
 	wg.Wait()
+	if isTTY {
+		fmt.Fprint(os.Stderr, "\r\033[K") // clear final progress line
+	}
 	return failCount
 }
 
