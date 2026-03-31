@@ -206,17 +206,14 @@ func StatusAll(parentDir string, repos []manifest.RepoInfo, maxWorkers int) []Re
 	return results
 }
 
-// ExecResult holds the outcome of running a command in one repo.
-type ExecResult struct {
-	Name   string
-	Output string
-	Err    error
-}
-
-// Exec runs a command in each repo dir in parallel, printing prefixed output.
-// Failed commands are retried synchronously (handles TTY/stdin issues).
-// Returns the number of repos that failed.
+// Exec runs a command in each repo dir in parallel, printing prefixed output
+// as each repo completes. Returns the number of repos that failed.
 func Exec(parentDir string, repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int) int {
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxWorkers)
+	failCount := 0
+
 	// Calculate max name length for alignment
 	maxName := 0
 	for _, r := range repos {
@@ -225,64 +222,52 @@ func Exec(parentDir string, repos []manifest.RepoInfo, cmdArgs []string, maxWork
 		}
 	}
 
-	// Phase 1: parallel execution
-	results := make([]ExecResult, len(repos))
-	sem := make(chan struct{}, maxWorkers)
-	var wg sync.WaitGroup
+	// Prevent git from hanging on credential/passphrase prompts
+	noPromptEnv := append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+	)
 
-	for i, repo := range repos {
+	for _, repo := range repos {
 		wg.Add(1)
-		go func(idx int, r manifest.RepoInfo) {
+		go func(r manifest.RepoInfo) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			prefix := fmt.Sprintf("%-*s | ", maxName, r.Name)
 			repoDir := filepath.Join(parentDir, r.Name)
+
 			if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
-				results[idx] = ExecResult{Name: r.Name, Err: fmt.Errorf("not cloned")}
+				mu.Lock()
+				fmt.Fprintf(os.Stderr, "%sskipped (not cloned)\n", prefix)
+				mu.Unlock()
 				return
 			}
 
 			cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 			cmd.Dir = repoDir
+			cmd.Stdin = nil
+			cmd.Env = noPromptEnv
 			output, err := cmd.CombinedOutput()
-			results[idx] = ExecResult{Name: r.Name, Output: string(output), Err: err}
-		}(i, repo)
-	}
-	wg.Wait()
 
-	// Phase 2: print results and retry failures synchronously
-	failCount := 0
-	for i, res := range results {
-		prefix := fmt.Sprintf("%-*s | ", maxName, res.Name)
+			mu.Lock()
+			defer mu.Unlock()
 
-		if res.Err != nil && res.Err.Error() == "not cloned" {
-			fmt.Fprintf(os.Stderr, "%sskipped (not cloned)\n", prefix)
-			continue
-		}
-
-		// Retry failed commands synchronously (handles TTY/pipe issues)
-		if res.Err != nil {
-			repoDir := filepath.Join(parentDir, repos[i].Name)
-			cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-			cmd.Dir = repoDir
-			output, err := cmd.CombinedOutput()
-			res = ExecResult{Name: res.Name, Output: string(output), Err: err}
-			results[i] = res
-		}
-
-		text := strings.TrimRight(res.Output, "\n")
-		if text != "" {
-			for _, line := range strings.Split(text, "\n") {
-				fmt.Println(prefix + line)
+			text := strings.TrimRight(string(output), "\n")
+			if text != "" {
+				for _, line := range strings.Split(text, "\n") {
+					fmt.Println(prefix + line)
+				}
 			}
-		}
-		if res.Err != nil {
-			fmt.Fprintf(os.Stderr, "%sfailed: %v\n", prefix, res.Err)
-			failCount++
-		}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%sfailed: %v\n", prefix, err)
+				failCount++
+			}
+		}(repo)
 	}
 
+	wg.Wait()
 	return failCount
 }
 
