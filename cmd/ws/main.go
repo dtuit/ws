@@ -27,22 +27,6 @@ func main() {
 		args = args[1:]
 	}
 
-	if cmd == "init" {
-		// Print just the function (for eval), without the markers
-		fmt.Print(`ws() {
-  case "$1" in
-    cd)
-      local dir
-      dir="$(command ws cd "${@:2}")" && cd "$dir"
-      ;;
-    *)
-      command ws "$@"
-      ;;
-  esac
-}
-`)
-		return
-	}
 	if cmd == "help" || cmd == "--help" || cmd == "-h" {
 		usage()
 		return
