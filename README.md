@@ -13,6 +13,24 @@ The intended model is simple:
 
 ## Install
 
+Fast install from release artifacts:
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/dtuit/ws/main/install.sh | sh
+```
+
+Pinned install:
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/dtuit/ws/main/install.sh | sh -s -- --version v0.1.0
+```
+
+The installer downloads the matching GitHub Release artifact, verifies its
+checksum, and installs `ws` into `~/.local/bin` by default, or `/usr/local/bin`
+when run as root. Override that with `WS_INSTALL_DIR=/some/path`.
+
+Install from source with Go:
+
 ```bash
 go install github.com/dtuit/ws/cmd/ws@latest
 ```
