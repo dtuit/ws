@@ -40,7 +40,6 @@ type RepoInfo struct {
 type rawManifest struct {
 	Root      string                       `yaml:"root"`      // where repos live (default "..")
 	Workspace string                       `yaml:"workspace"` // VS Code workspace filename
-	Remote    string                       `yaml:"remote"`    // backward compat: singular
 	Remotes   map[string]string            `yaml:"remotes"`   // named remotes
 	Branch    string                       `yaml:"branch"`
 	Groups    map[string][]string          `yaml:"groups"`
@@ -96,10 +95,6 @@ func Parse(data []byte) (*Manifest, error) {
 		m.Groups = make(map[string][]string)
 	}
 
-	// Remotes: merge singular "remote" as "default", then overlay "remotes" map
-	if raw.Remote != "" {
-		m.Remotes["default"] = raw.Remote
-	}
 	for name, url := range raw.Remotes {
 		m.Remotes[name] = url
 	}

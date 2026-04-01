@@ -14,12 +14,6 @@
 #
 # Allowed schemes: git@ (SSH shorthand), https://, ssh://, git://, http://
 # Rejected: ext::, file://, ftp://, or anything starting with --
-#
-# You can also use the legacy singular form:
-#   remote: git@github.com:acme-corp
-# which is equivalent to:
-#   remotes:
-#     default: git@github.com:acme-corp
 
 remotes:
   default: git@github.com:acme-corp

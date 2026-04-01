@@ -68,20 +68,6 @@ func TestParse_BranchOverride(t *testing.T) {
 	assert.Equal(t, "develop", m.ResolveBranch(cfg))
 }
 
-func TestParse_BackwardCompat_SingularRemote(t *testing.T) {
-	yaml := `
-remote: git@github.com:acme-corp
-branch: main
-repos:
-  my-repo:
-`
-	m, err := Parse([]byte(yaml))
-	require.NoError(t, err)
-
-	assert.Equal(t, "git@github.com:acme-corp", m.Remotes["default"])
-	assert.Equal(t, "git@github.com:acme-corp/my-repo.git", m.ResolveURL("my-repo", m.Repos["my-repo"]))
-}
-
 func TestResolveURL(t *testing.T) {
 	m, err := Parse([]byte(testManifest))
 	require.NoError(t, err)
