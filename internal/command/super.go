@@ -39,7 +39,7 @@ func ParseSuperArgs(m *manifest.Manifest, args []string) (filter string, cmdArgs
 		switch {
 		case arg == "--worktrees" || arg == "-W":
 			includeWorktrees = true
-		case filter == "" && m.IsGroupOrRepo(arg):
+		case filter == "" && isFilterToken(m, arg):
 			filter = arg
 		default:
 			return filter, args[i:], includeWorktrees

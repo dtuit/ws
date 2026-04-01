@@ -162,7 +162,7 @@ ws backend git status
 ws code backend
 ```
 
-If you want shell integration for `ws cd`, either add this to your shell config:
+If you want shell integration for `ws cd` and tab completion, either add this to your shell config:
 
 ```bash
 export WS_HOME=/path/to/acme-workspace
@@ -174,6 +174,8 @@ or let `ws` write it for you:
 ```bash
 ws setup --install-shell
 ```
+
+With that loaded, `ws` completes built-in commands, filters, repo names, and falls back to your shell's command completion for fan-out commands like `ws backend git ...`.
 
 ## Daily Workflow
 
@@ -194,11 +196,16 @@ ws setup [filter]         Clone missing repos
 ws fetch [filter]         Fetch all repos in scope
 ws pull [filter] [--worktrees]
                           Pull manifest checkouts or all discovered worktrees
-ws code [filter]          Generate the VS Code workspace file
 ws context [filter]       Persist the default filter
+ws code [-t|--worktrees] [filter]
+                          Generate the VS Code workspace file
+ws context add <filter>   Extend the current context
 ws cd [repo] [--worktree <selector>]
                           Print repo path (or workspace root)
+ws init                   Emit shell integration and completion
 ```
+
+`ws code` is git-worktree aware. If a selected repo has sibling worktrees, they are added as separate folders so both checkouts appear in the VS Code Explorer. `-t` is accepted as a short explicit alias for `ws code --worktrees`.
 
 Any unrecognized command is executed across repos automatically:
 
@@ -210,7 +217,7 @@ ws ops make plan
 ws -- fetch data.json
 ```
 
-`ws cd` changes your shell directory only when the `ws init` shell function is installed. Otherwise it prints the path.
+`ws cd` changes your shell directory only when the `ws init` shell function is installed. The same shell hook also enables completion for `bash` and `zsh`. Without it, `ws cd` just prints the path.
 
 ## Filters
 
@@ -232,6 +239,7 @@ If you want a repo included in default operations, put it in at least one group.
 - `ws ll --worktrees`, `ws pull --worktrees`, and `ws --worktrees <command...>` expand operations to all discovered worktrees.
 - `ws cd api-server --worktree feature/auth` resolves a linked worktree by unique branch, path basename, or exact path.
 - `ws fetch` remains repo-scoped and runs once per manifest repo.
+- `ws code` always includes sibling worktrees in the generated workspace, and `ws code -t backend` is accepted as an explicit form.
 
 ## Context And Agents
 
@@ -244,12 +252,14 @@ If you want a repo included in default operations, put it in at least one group.
 That makes the workspace repo useful as an agent entry point:
 
 - run `ws context backend` before starting focused work
+- run `ws context add repo-x` when you want to widen that scope without replacing it
 - use the workspace repo as the control plane and `.scope/` as the narrowed filesystem view for agents
 - keep the shared manifest committed while local context stays in ignored files
 
 Recommended operator and agent loop:
 
 1. From the workspace root, run `ws context <filter>`.
+   To widen an existing scope, use `ws context add <filter>`.
 2. Verify the scope with `ws ll` or `ws list`.
 3. Start the agent from `.scope/` when you want filesystem visibility to match that context.
 4. Return to the workspace root when you need to change scope or edit `manifest.yml`.

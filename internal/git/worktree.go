@@ -149,6 +149,41 @@ func DiscoverWorktreesAll(repos []manifest.RepoInfo, maxWorkers int) []WorktreeS
 	return results
 }
 
+// WorktreePaths returns all worktree paths for the git repository containing repoDir.
+// The result includes repoDir itself when it is part of the worktree set.
+func WorktreePaths(repoDir string) ([]string, error) {
+	worktrees, err := parseWorktreeListFromRepo(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(worktrees) == 0 {
+		return []string{filepath.Clean(repoDir)}, nil
+	}
+
+	paths := make([]string, 0, len(worktrees))
+	seen := make(map[string]bool, len(worktrees))
+	for _, worktree := range worktrees {
+		path := filepath.Clean(worktree.Path)
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	return paths, nil
+}
+
+func parseWorktreeListFromRepo(repoDir string) ([]WorktreeInfo, error) {
+	if !IsCheckout(repoDir) {
+		return nil, ErrNotCloned
+	}
+	out, err := gitCmd(repoDir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	return parseWorktreeList(out)
+}
+
 func resolveGitPath(repoDir, gitPath string) string {
 	gitPath = strings.TrimSpace(gitPath)
 	if filepath.IsAbs(gitPath) {

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/dtuit/ws/internal/git"
 	"github.com/dtuit/ws/internal/manifest"
 )
 
@@ -48,15 +49,26 @@ func buildWorkspace(repos []manifest.RepoInfo, wsHome string) map[string]interfa
 	folders := []interface{}{
 		map[string]interface{}{"name": "~ workspace", "path": "."},
 	}
+	seenPaths := map[string]bool{
+		filepath.Clean(wsHome): true,
+	}
+	seenNames := map[string]int{
+		"~ workspace": 1,
+	}
 	for _, repo := range repos {
-		relPath, err := filepath.Rel(wsHome, repo.Path)
-		if err != nil {
-			relPath = repo.Path
+		for _, folder := range repoFolders(repo, wsHome) {
+			path := filepath.Clean(folder.Path)
+			if seenPaths[path] {
+				continue
+			}
+			relPath := relWorkspacePath(wsHome, path)
+			name := uniqueFolderName(folder.Name, relPath, seenNames)
+			folders = append(folders, map[string]interface{}{
+				"name": name,
+				"path": relPath,
+			})
+			seenPaths[path] = true
 		}
-		folders = append(folders, map[string]interface{}{
-			"name": repo.Name,
-			"path": relPath,
-		})
 	}
 
 	return map[string]interface{}{
@@ -66,6 +78,82 @@ func buildWorkspace(repos []manifest.RepoInfo, wsHome string) map[string]interfa
 				"**/.git": true,
 			},
 		},
+	}
+}
+
+type workspaceFolder struct {
+	Name string
+	Path string
+}
+
+func repoFolders(repo manifest.RepoInfo, wsHome string) []workspaceFolder {
+	paths := []string{repo.Path}
+	if worktrees, err := git.WorktreePaths(repo.Path); err == nil {
+		paths = orderedWorktreePaths(repo.Path, worktrees)
+	}
+
+	folders := make([]workspaceFolder, 0, len(paths))
+	for _, path := range paths {
+		name := repo.Name
+		if filepath.Clean(path) != filepath.Clean(repo.Path) {
+			suffix := filepath.Base(path)
+			if suffix == "" || suffix == "." || suffix == repo.Name {
+				suffix = relWorkspacePath(wsHome, path)
+			}
+			name = fmt.Sprintf("%s [%s]", repo.Name, suffix)
+		}
+		folders = append(folders, workspaceFolder{
+			Name: name,
+			Path: path,
+		})
+	}
+	return folders
+}
+
+func orderedWorktreePaths(primary string, paths []string) []string {
+	primary = filepath.Clean(primary)
+
+	ordered := []string{primary}
+	seen := map[string]bool{
+		primary: true,
+	}
+	for _, path := range paths {
+		path = filepath.Clean(path)
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		ordered = append(ordered, path)
+	}
+	return ordered
+}
+
+func relWorkspacePath(wsHome, path string) string {
+	relPath, err := filepath.Rel(wsHome, path)
+	if err != nil {
+		return path
+	}
+	return relPath
+}
+
+func uniqueFolderName(baseName, relPath string, seen map[string]int) string {
+	if seen[baseName] == 0 {
+		seen[baseName] = 1
+		return baseName
+	}
+
+	name := fmt.Sprintf("%s (%s)", baseName, relPath)
+	if seen[name] == 0 {
+		seen[name] = 1
+		return name
+	}
+
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s (%s #%d)", baseName, relPath, i)
+		if seen[candidate] == 0 {
+			seen[candidate] = 1
+			return candidate
+		}
 	}
 }
 
