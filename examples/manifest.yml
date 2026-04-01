@@ -1,0 +1,30 @@
+# Example workspace: small Go ecosystem projects
+# Run: cd examples && ws setup
+
+remotes:
+  default: https://github.com/charmbracelet
+
+branch: main
+root: repos
+
+groups:
+  tui: [bubbletea, bubbles, lipgloss]
+  util: [log, harmonica]
+
+repos:
+  # --- TUI framework ---
+  bubbletea:                         # terminal UI framework
+  bubbles:                           # TUI components
+  lipgloss:                          # style definitions for terminal
+
+  # --- Utilities ---
+  log:                               # structured logging
+  harmonica: { branch: master }      # spring animation library
+
+  # --- Excluded ---
+  # wish:                            # SSH server for TUI apps
+  # huh:                             # interactive forms
+
+exclude:
+  - wish
+  - huh
