@@ -35,7 +35,7 @@ func ParseSuperArgs(m *manifest.Manifest, args []string) (filter string, cmdArgs
 	if len(args) == 0 {
 		return "", nil
 	}
-	if m.IsGroupOrRepo(args[0]) {
+	if isFilterToken(m, args[0]) {
 		return args[0], args[1:]
 	}
 	return "", args

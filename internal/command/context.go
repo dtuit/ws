@@ -16,6 +16,10 @@ const scopeDir = ".scope"
 // and updates the repos/ symlink directory to match.
 func SetContext(m *manifest.Manifest, wsHome, filter string) error {
 	path := filepath.Join(wsHome, contextFile)
+	filter, err := normalizeContextFilter(m, filter)
+	if err != nil {
+		return err
+	}
 
 	if filter == "" || filter == "none" || filter == "reset" {
 		os.Remove(path)
@@ -42,6 +46,27 @@ func SetContext(m *manifest.Manifest, wsHome, filter string) error {
 	return Code(m, wsHome, filter)
 }
 
+// AddContext extends the current context with more groups or repos.
+// If no context is set, it behaves like SetContext.
+func AddContext(m *manifest.Manifest, wsHome, filter string) error {
+	addition, err := normalizeContextFilter(m, filter)
+	if err != nil {
+		return err
+	}
+	if addition == "" {
+		return fmt.Errorf("usage: ws context add <filter>")
+	}
+
+	currentRaw := GetContext(wsHome)
+	current, err := normalizeContextFilter(m, currentRaw)
+	if err != nil {
+		return fmt.Errorf("existing context %q is invalid: %w", currentRaw, err)
+	}
+
+	merged := mergeContextFilters(current, addition)
+	return SetContext(m, wsHome, merged)
+}
+
 // GetContext reads the current context filter, or "" if none is set.
 func GetContext(wsHome string) string {
 	data, err := os.ReadFile(filepath.Join(wsHome, contextFile))
@@ -58,8 +83,17 @@ func ShowContext(m *manifest.Manifest, wsHome string) {
 		fmt.Println("No context set (using all grouped repos)")
 		return
 	}
-	repos := m.ResolveFilter(ctx, wsHome)
-	fmt.Printf("Context: %s (%d repos)\n", ctx, len(repos))
+	normalized, err := normalizeContextFilter(m, ctx)
+	if err != nil {
+		fmt.Printf("Context: %s (invalid: %v)\n", ctx, err)
+		return
+	}
+	if normalized == "" {
+		fmt.Println("No context set (using all grouped repos)")
+		return
+	}
+	repos := m.ResolveFilter(normalized, wsHome)
+	fmt.Printf("Context: %s (%d repos)\n", normalized, len(repos))
 }
 
 // syncReposDir creates/updates a repos/ directory with symlinks to the scoped repos.
@@ -100,4 +134,79 @@ func syncReposDir(m *manifest.Manifest, wsHome, filter string) error {
 
 	fmt.Printf(".scope/ updated (%d symlinks)\n", len(repos))
 	return nil
+}
+
+func normalizeContextFilter(m *manifest.Manifest, filter string) (string, error) {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return "", nil
+	}
+
+	active := m.ActiveRepos()
+	tokens := strings.Split(filter, ",")
+	seen := make(map[string]bool)
+	var normalized []string
+	var invalid []string
+	hasAll := false
+
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+
+		switch token {
+		case "none", "reset":
+			if len(tokens) > 1 {
+				return "", fmt.Errorf("%q cannot be combined with other filters", token)
+			}
+			return "", nil
+		case "all":
+			hasAll = true
+			continue
+		}
+
+		if _, ok := m.Groups[token]; !ok {
+			if _, ok := active[token]; !ok {
+				invalid = append(invalid, token)
+				continue
+			}
+		}
+
+		if !seen[token] {
+			seen[token] = true
+			normalized = append(normalized, token)
+		}
+	}
+
+	if len(invalid) > 0 {
+		return "", fmt.Errorf("unknown context filter(s): %s", strings.Join(invalid, ", "))
+	}
+	if hasAll {
+		return "all", nil
+	}
+	return strings.Join(normalized, ","), nil
+}
+
+func mergeContextFilters(current, addition string) string {
+	if current == "" {
+		return addition
+	}
+	if current == "all" || addition == "all" {
+		return "all"
+	}
+
+	seen := make(map[string]bool)
+	var merged []string
+	for _, filter := range []string{current, addition} {
+		for _, token := range strings.Split(filter, ",") {
+			token = strings.TrimSpace(token)
+			if token == "" || seen[token] {
+				continue
+			}
+			seen[token] = true
+			merged = append(merged, token)
+		}
+	}
+	return strings.Join(merged, ",")
 }

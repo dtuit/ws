@@ -54,7 +54,7 @@ func Setup(m *manifest.Manifest, wsHome, filter string, installShell bool) error
 			return fmt.Errorf("installing shell config: %w", err)
 		}
 	} else if os.Getenv("WS_HOME") == "" {
-		fmt.Printf("\nAdd to your shell config (~/.bashrc or ~/.zshrc):\n\n")
+		fmt.Printf("\nAdd to your shell config (~/.bashrc or ~/.zshrc) for ws cd and completion:\n\n")
 		fmt.Printf("  # BEGIN ws\n")
 		fmt.Printf("  export WS_HOME=%q\n", wsHome)
 		fmt.Printf("  eval \"$(ws init)\"\n")
