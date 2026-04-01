@@ -32,6 +32,16 @@ func initTestRepo(t *testing.T, dir, name string) string {
 	return repoDir
 }
 
+func addTestWorktree(t *testing.T, repoDir, name, branch string) string {
+	t.Helper()
+	worktreeDir := filepath.Join(filepath.Dir(repoDir), name)
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, worktreeDir)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git worktree add failed: %s", out)
+	return worktreeDir
+}
+
 func TestStatus_CleanRepo(t *testing.T) {
 	dir := t.TempDir()
 	repoDir := initTestRepo(t, dir, "clean-repo")
@@ -158,6 +168,73 @@ func TestStatus_NoRemote(t *testing.T) {
 	s := Status(repoDir, "no-remote")
 	assert.True(t, s.NoRemote)
 	assert.Equal(t, "~", s.SyncSymbol())
+}
+
+func TestStatus_WorktreeStashUsesCommonDir(t *testing.T) {
+	dir := t.TempDir()
+	repoDir := initTestRepo(t, dir, "stash-repo")
+	trackedFile := filepath.Join(repoDir, "tracked.txt")
+	require.NoError(t, os.WriteFile(trackedFile, []byte("v1"), 0644))
+	for _, args := range [][]string{
+		{"git", "add", "tracked.txt"},
+		{"git", "commit", "-m", "add tracked file"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "cmd %v failed: %s", args, out)
+	}
+	worktreeDir := addTestWorktree(t, repoDir, "stash-feature", "feature/stash")
+
+	require.NoError(t, os.WriteFile(filepath.Join(worktreeDir, "tracked.txt"), []byte("stash me"), 0644))
+	cmd := exec.Command("git", "stash", "push", "-m", "worktree stash")
+	cmd.Dir = worktreeDir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git stash failed: %s", out)
+
+	s := Status(worktreeDir, "stash-feature")
+	assert.NoError(t, s.Err)
+	assert.True(t, s.Stashed)
+	assert.Equal(t, "feature/stash", s.Branch)
+}
+
+func TestDiscoverWorktrees_LinkedCheckout(t *testing.T) {
+	dir := t.TempDir()
+	repoDir := initTestRepo(t, dir, "repo")
+	worktreeDir := addTestWorktree(t, repoDir, "repo-feature", "feature/list")
+
+	repo := manifest.RepoInfo{Name: "repo", Path: repoDir, Branch: "master"}
+	worktrees, err := DiscoverWorktrees(repo)
+	require.NoError(t, err)
+	require.Len(t, worktrees, 2)
+
+	assert.Equal(t, filepath.Clean(repoDir), worktrees[0].Path)
+	assert.True(t, worktrees[0].Primary)
+	assert.Equal(t, "master", worktrees[0].Branch)
+	assert.Equal(t, filepath.Join(repoDir, ".git"), worktrees[0].CommonDir)
+
+	assert.Equal(t, filepath.Clean(worktreeDir), worktrees[1].Path)
+	assert.False(t, worktrees[1].Primary)
+	assert.Equal(t, "feature/list", worktrees[1].Branch)
+	assert.Equal(t, filepath.Join(repoDir, ".git"), worktrees[1].CommonDir)
+}
+
+func TestDiscoverWorktrees_PrimaryTracksManifestPath(t *testing.T) {
+	dir := t.TempDir()
+	repoDir := initTestRepo(t, dir, "repo")
+	worktreeDir := addTestWorktree(t, repoDir, "repo-feature", "feature/primary")
+
+	repo := manifest.RepoInfo{Name: "repo", Path: worktreeDir, Branch: "feature/primary"}
+	worktrees, err := DiscoverWorktrees(repo)
+	require.NoError(t, err)
+	require.Len(t, worktrees, 2)
+
+	assert.Equal(t, filepath.Clean(worktreeDir), worktrees[0].Path)
+	assert.True(t, worktrees[0].Primary)
+	assert.Equal(t, "feature/primary", worktrees[0].Branch)
+
+	assert.Equal(t, filepath.Clean(repoDir), worktrees[1].Path)
+	assert.False(t, worktrees[1].Primary)
 }
 
 func TestSymbols_Empty(t *testing.T) {

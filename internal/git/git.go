@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -86,9 +85,8 @@ func gitCmd(dir string, args ...string) (string, error) {
 func Status(repoDir, name string) RepoStatus {
 	s := RepoStatus{Name: name}
 
-	gitDir := filepath.Join(repoDir, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
-		s.Err = fmt.Errorf("not cloned")
+	if _, err := GitDir(repoDir); err != nil {
+		s.Err = ErrNotCloned
 		return s
 	}
 
@@ -100,11 +98,12 @@ func Status(repoDir, name string) RepoStatus {
 	}
 	parseStatusV2(&s, statusOut)
 
-	// Stash: check file existence (no git command needed)
-	stashFile := filepath.Join(repoDir, ".git", "logs", "refs", "stash")
-	if _, err := os.Stat(stashFile); err == nil {
-		s.Stashed = true
+	stashed, err := HasStash(repoDir)
+	if err != nil {
+		s.Err = err
+		return s
 	}
+	s.Stashed = stashed
 
 	// Last commit message + age
 	logOut, err := gitCmd(repoDir, "log", "-1", "--format=%s\x1f%ar")

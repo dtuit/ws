@@ -82,9 +82,10 @@ repos:
 `))
 	require.NoError(t, err)
 
-	filter, cmdArgs := ParseSuperArgs(m, []string{"ai", "git", "status"})
+	filter, cmdArgs, includeWorktrees := ParseSuperArgs(m, []string{"ai", "git", "status"})
 	assert.Equal(t, "ai", filter)
 	assert.Equal(t, []string{"git", "status"}, cmdArgs)
+	assert.False(t, includeWorktrees)
 }
 
 func TestParseSuperArgs_WithoutGroup(t *testing.T) {
@@ -96,9 +97,44 @@ repos:
 `))
 	require.NoError(t, err)
 
-	filter, cmdArgs := ParseSuperArgs(m, []string{"git", "status"})
+	filter, cmdArgs, includeWorktrees := ParseSuperArgs(m, []string{"git", "status"})
 	assert.Equal(t, "", filter)
 	assert.Equal(t, []string{"git", "status"}, cmdArgs)
+	assert.False(t, includeWorktrees)
+}
+
+func TestParseSuperArgs_WorktreesBeforeFilter(t *testing.T) {
+	m, err := manifest.Parse([]byte(`
+remotes:
+  default: git@example.com
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+`))
+	require.NoError(t, err)
+
+	filter, cmdArgs, includeWorktrees := ParseSuperArgs(m, []string{"--worktrees", "ai", "git", "status"})
+	assert.Equal(t, "ai", filter)
+	assert.Equal(t, []string{"git", "status"}, cmdArgs)
+	assert.True(t, includeWorktrees)
+}
+
+func TestParseSuperArgs_WorktreesAfterFilter(t *testing.T) {
+	m, err := manifest.Parse([]byte(`
+remotes:
+  default: git@example.com
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+`))
+	require.NoError(t, err)
+
+	filter, cmdArgs, includeWorktrees := ParseSuperArgs(m, []string{"ai", "--worktrees", "git", "status"})
+	assert.Equal(t, "ai", filter)
+	assert.Equal(t, []string{"git", "status"}, cmdArgs)
+	assert.True(t, includeWorktrees)
 }
 
 func TestParseSuperArgs_Empty(t *testing.T) {
@@ -109,7 +145,8 @@ repos:
   repo-a:
 `))
 
-	filter, cmdArgs := ParseSuperArgs(m, nil)
+	filter, cmdArgs, includeWorktrees := ParseSuperArgs(m, nil)
 	assert.Equal(t, "", filter)
 	assert.Nil(t, cmdArgs)
+	assert.False(t, includeWorktrees)
 }

@@ -9,7 +9,7 @@ import (
 )
 
 // Super runs an arbitrary command in each repo directory.
-func Super(m *manifest.Manifest, wsHome, filter string, cmdArgs []string) error {
+func Super(m *manifest.Manifest, wsHome, filter string, cmdArgs []string, includeWorktrees bool) error {
 	// Validate the command exists before fanning out
 	if _, err := exec.LookPath(cmdArgs[0]); err != nil {
 		return fmt.Errorf("command not found: %s", cmdArgs[0])
@@ -19,6 +19,9 @@ func Super(m *manifest.Manifest, wsHome, filter string, cmdArgs []string) error 
 	if len(repos) == 0 {
 		fmt.Println("No repos matched the filter.")
 		return nil
+	}
+	if includeWorktrees {
+		repos = expandReposToWorktrees(repos)
 	}
 
 	workers := git.Workers(len(repos))
@@ -30,13 +33,17 @@ func Super(m *manifest.Manifest, wsHome, filter string, cmdArgs []string) error 
 }
 
 // ParseSuperArgs disambiguates the filter and command arguments.
-// If the first arg matches a known group or repo, it's the filter.
-func ParseSuperArgs(m *manifest.Manifest, args []string) (filter string, cmdArgs []string) {
-	if len(args) == 0 {
-		return "", nil
+// Leading ws flags are parsed before the command starts.
+func ParseSuperArgs(m *manifest.Manifest, args []string) (filter string, cmdArgs []string, includeWorktrees bool) {
+	for i, arg := range args {
+		switch {
+		case arg == "--worktrees" || arg == "-W":
+			includeWorktrees = true
+		case filter == "" && m.IsGroupOrRepo(arg):
+			filter = arg
+		default:
+			return filter, args[i:], includeWorktrees
+		}
 	}
-	if m.IsGroupOrRepo(args[0]) {
-		return args[0], args[1:]
-	}
-	return "", args
+	return filter, nil, includeWorktrees
 }

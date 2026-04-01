@@ -13,6 +13,24 @@ The intended model is simple:
 
 ## Install
 
+Fast install from release artifacts:
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/dtuit/ws/main/install.sh | sh
+```
+
+Pinned install:
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/dtuit/ws/main/install.sh | sh -s -- --version v0.1.0
+```
+
+The installer downloads the matching GitHub Release artifact, verifies its
+checksum, and installs `ws` into `~/.local/bin` by default, or `/usr/local/bin`
+when run as root. Override that with `WS_INSTALL_DIR=/some/path`.
+
+Install from source with Go:
+
 ```bash
 go install github.com/dtuit/ws/cmd/ws@latest
 ```
@@ -168,20 +186,25 @@ Operate from the workspace repo. `ws` finds the workspace by:
 Core commands:
 
 ```text
-ws ll [filter]            Dashboard: branch, dirty state, last commit
-ws list [--all]           Show repos in the manifest
+ws ll [filter] [--worktrees]
+                          Dashboard: branch, dirty state, last commit
+ws list [--all] [--worktrees]
+                          Show repos in the manifest
 ws setup [filter]         Clone missing repos
 ws fetch [filter]         Fetch all repos in scope
-ws pull [filter]          Pull all repos in scope
+ws pull [filter] [--worktrees]
+                          Pull manifest checkouts or all discovered worktrees
 ws code [filter]          Generate the VS Code workspace file
 ws context [filter]       Persist the default filter
-ws cd [repo]              Print repo path (or workspace root)
+ws cd [repo] [--worktree <selector>]
+                          Print repo path (or workspace root)
 ```
 
 Any unrecognized command is executed across repos automatically:
 
 ```bash
 ws git status
+ws --worktrees git status
 ws backend git log --oneline -3
 ws ops make plan
 ws -- fetch data.json
@@ -199,6 +222,16 @@ Filters apply to `ll`, `setup`, `fetch`, `pull`, `code`, `context`, and fan-out 
 - `api-server`: an individual repo
 
 If you want a repo included in default operations, put it in at least one group. The default `all` filter only includes grouped repos.
+
+## Worktrees
+
+`ws` discovers linked git worktrees at runtime from the manifest checkout. They are not stored in `manifest.yml`.
+
+- Default commands still target the manifest checkout for each repo.
+- `ws list` shows a `WT` count for each repo; `ws list --worktrees` expands to one row per checkout.
+- `ws ll --worktrees`, `ws pull --worktrees`, and `ws --worktrees <command...>` expand operations to all discovered worktrees.
+- `ws cd api-server --worktree feature/auth` resolves a linked worktree by unique branch, path basename, or exact path.
+- `ws fetch` remains repo-scoped and runs once per manifest repo.
 
 ## Context And Agents
 

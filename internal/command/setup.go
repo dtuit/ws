@@ -38,8 +38,7 @@ func Setup(m *manifest.Manifest, wsHome, filter string, installShell bool) error
 
 	total := 0
 	for _, repo := range m.AllRepos(wsHome) {
-		gitDir := filepath.Join(repo.Path, ".git")
-		if _, err := os.Stat(gitDir); err == nil {
+		if git.IsCheckout(repo.Path) {
 			total++
 		}
 	}

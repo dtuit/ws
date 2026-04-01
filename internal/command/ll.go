@@ -9,11 +9,22 @@ import (
 )
 
 // LL displays a dashboard of repo status: branch, dirty state, last commit.
-func LL(m *manifest.Manifest, wsHome, filter string) error {
+func LL(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) error {
 	repos := m.ResolveFilter(filter, wsHome)
 	if len(repos) == 0 {
 		fmt.Println("No repos matched the filter.")
 		return nil
+	}
+
+	worktreeExtras := make(map[string]int)
+	if includeWorktrees {
+		repos = expandReposToWorktrees(repos)
+	} else {
+		for _, set := range git.DiscoverWorktreesAll(repos, git.Workers(len(repos))) {
+			if set.Err == nil && len(set.Worktrees) > 1 {
+				worktreeExtras[set.Repo.Name] = len(set.Worktrees) - 1
+			}
+		}
 	}
 
 	workers := git.Workers(len(repos))
@@ -73,10 +84,14 @@ func LL(m *manifest.Manifest, wsHome, filter string) error {
 		if s.CommitAge != "" {
 			age = " " + term.Colorize(term.Dim, "("+s.CommitAge+")")
 		}
+		extras := ""
+		if extra := worktreeExtras[s.Name]; extra > 0 {
+			extras = " " + term.Colorize(term.Dim, fmt.Sprintf("[+%d wt]", extra))
+		}
 
 		fmt.Printf("%s  %s%s\n",
 			term.Colorize(color, fmt.Sprintf("%-*s  %-*s %s[%s]", maxName, s.Name, maxBranch, s.Branch, syncStr, symbolStr)),
-			msg, age)
+			msg, age+extras)
 	}
 	return nil
 }

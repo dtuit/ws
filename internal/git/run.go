@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -64,7 +63,7 @@ func RunAll(repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int, opts Ru
 
 			prefix := fmt.Sprintf("%-*s | ", maxName, r.Name)
 
-			if _, err := os.Stat(filepath.Join(r.Path, ".git")); err != nil {
+			if !IsCheckout(r.Path) {
 				mu.Lock()
 				done++
 				fmt.Fprintf(os.Stderr, "%sskipped (not cloned)\n", prefix)

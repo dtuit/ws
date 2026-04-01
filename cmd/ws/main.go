@@ -14,12 +14,16 @@ func main() {
 	args := os.Args[1:]
 	cmd := "help"
 	var wsHomeOverride string
+	globalWorktrees := false
 
 	// Parse global flags before command
 	for len(args) > 0 {
 		if (args[0] == "-w" || args[0] == "--workspace") && len(args) > 1 {
 			wsHomeOverride = args[1]
 			args = args[2:]
+		} else if args[0] == "--worktrees" || args[0] == "-W" {
+			globalWorktrees = true
+			args = args[1:]
 		} else {
 			break
 		}
@@ -85,12 +89,26 @@ func main() {
 		if len(args) == 0 {
 			fmt.Println(wsHome)
 		} else {
-			name := args[0]
+			name, selector, err := parseCDArgs(args)
+			if err != nil {
+				fatal(err)
+			}
 			cfg, ok := m.ActiveRepos()[name]
 			if !ok {
 				fatal(fmt.Errorf("unknown repo: %s", name))
 			}
-			fmt.Println(m.ResolvePath(wsHome, name, cfg))
+			repo := manifest.RepoInfo{
+				Name:   name,
+				URL:    m.ResolveURL(name, cfg),
+				Branch: m.ResolveBranch(cfg),
+				Groups: m.RepoGroups()[name],
+				Path:   m.ResolvePath(wsHome, name, cfg),
+			}
+			path, err := command.CDPath(repo, selector)
+			if err != nil {
+				fatal(err)
+			}
+			fmt.Println(path)
 		}
 
 	case "setup":
@@ -116,18 +134,19 @@ func main() {
 
 	case "list":
 		showAll := false
-		for _, a := range args {
-			if a == "--all" || a == "-a" {
-				showAll = true
-			}
+		args, showAll = stripBoolFlag(args, "--all", "-a")
+		args, localWorktrees := stripBoolFlag(args, "--worktrees", "-W")
+		if len(args) > 0 {
+			fatal(fmt.Errorf("list does not take a filter"))
 		}
-		if err := command.List(m, wsHome, showAll); err != nil {
+		if err := command.List(m, wsHome, showAll, globalWorktrees || localWorktrees); err != nil {
 			fatal(err)
 		}
 
 	case "ll":
+		args, localWorktrees := stripBoolFlag(args, "--worktrees", "-W")
 		filter := filterArg(args, ctx)
-		if err := command.LL(m, wsHome, filter); err != nil {
+		if err := command.LL(m, wsHome, filter, globalWorktrees || localWorktrees); err != nil {
 			fatal(err)
 		}
 
@@ -138,29 +157,30 @@ func main() {
 		}
 
 	case "pull":
+		args, localWorktrees := stripBoolFlag(args, "--worktrees", "-W")
 		filter := filterArg(args, ctx)
-		if err := command.Pull(m, wsHome, filter); err != nil {
+		if err := command.Pull(m, wsHome, filter, globalWorktrees || localWorktrees); err != nil {
 			fatal(err)
 		}
 
 	case "--":
 		// Explicit escape: "ws -- [filter] <command...>"
-		filter, cmdArgs := command.ParseSuperArgs(m, args)
+		filter, cmdArgs, localWorktrees := command.ParseSuperArgs(m, args)
 		if filter == "" {
 			filter = ctx
 		}
 		if len(cmdArgs) == 0 {
-			fmt.Fprintln(os.Stderr, "Usage: ws -- [filter] <command...>")
+			fmt.Fprintln(os.Stderr, "Usage: ws -- [--worktrees] [filter] <command...>")
 			os.Exit(1)
 		}
-		if err := command.Super(m, wsHome, filter, cmdArgs); err != nil {
+		if err := command.Super(m, wsHome, filter, cmdArgs, globalWorktrees || localWorktrees); err != nil {
 			fatal(err)
 		}
 
 	default:
 		// Passthrough: treat as command to run across repos
 		allArgs := append([]string{cmd}, args...)
-		filter, cmdArgs := command.ParseSuperArgs(m, allArgs)
+		filter, cmdArgs, localWorktrees := command.ParseSuperArgs(m, allArgs)
 		if filter == "" {
 			filter = ctx
 		}
@@ -169,10 +189,53 @@ func main() {
 			usage()
 			os.Exit(1)
 		}
-		if err := command.Super(m, wsHome, filter, cmdArgs); err != nil {
+		if err := command.Super(m, wsHome, filter, cmdArgs, globalWorktrees || localWorktrees); err != nil {
 			fatal(err)
 		}
 	}
+}
+
+func stripBoolFlag(args []string, names ...string) ([]string, bool) {
+	if len(args) == 0 {
+		return args, false
+	}
+	nameSet := make(map[string]bool, len(names))
+	for _, name := range names {
+		nameSet[name] = true
+	}
+
+	rest := make([]string, 0, len(args))
+	found := false
+	for _, arg := range args {
+		if nameSet[arg] {
+			found = true
+			continue
+		}
+		rest = append(rest, arg)
+	}
+	return rest, found
+}
+
+func parseCDArgs(args []string) (name, selector string, err error) {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--worktree", "-t":
+			if i+1 >= len(args) {
+				return "", "", fmt.Errorf("cd requires a selector after %s", args[i])
+			}
+			selector = args[i+1]
+			i++
+		default:
+			if name != "" {
+				return "", "", fmt.Errorf("cd takes one repo name")
+			}
+			name = args[i]
+		}
+	}
+	if name == "" {
+		return "", "", fmt.Errorf("cd requires a repo name")
+	}
+	return name, selector, nil
 }
 
 // filterArg returns the explicit filter if given, otherwise falls back to context.
@@ -234,22 +297,29 @@ func usage() {
 	fmt.Print(`Usage: ws [-w <path>] <command> [args]
 
 Commands:
-  ll [filter]            Dashboard: branch, dirty, last commit
-  cd [repo]              Print repo path (no arg = workspace root)
+  ll [filter] [--worktrees]
+                         Dashboard: branch, dirty, last commit
+  cd [repo] [--worktree <selector>]
+                         Print repo path (no arg = workspace root)
   setup [filter]         Clone missing repos
   code [filter]          Generate VS Code workspace and open it
-  list [--all]           Show repos in manifest (--all includes excluded)
+  list [--all] [--worktrees]
+                         Show repos in manifest (--all includes excluded)
   fetch [filter]         Fetch all repos
-  pull [filter]          Pull all repos
+  pull [filter] [--worktrees]
+                         Pull manifest checkouts or all discovered worktrees
   context [filter]       Set default filter (no arg = show, "none" = clear)
 
 Any unrecognized command is run across repos:
   ws git status          Run "git status" in all repos
+  ws --worktrees git status
+                         Run "git status" in all discovered worktrees
   ws ai git log -1       Run "git log -1" in a group
   ws ls -la              Any command, not just git
 
 Use -- to escape built-in names:
-  ws -- fetch data.json  Run "fetch data.json" (not git fetch)
+  ws -- [--worktrees] fetch data.json
+                         Run "fetch data.json" (not git fetch)
 
 Filters:
   all                    All repos in any group (default)
