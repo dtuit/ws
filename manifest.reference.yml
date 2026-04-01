@@ -37,6 +37,9 @@ branch: main
 #   root: ..              # sibling layout (default)
 #   root: repos           # repos inside workspace directory
 #   root: /opt/code       # absolute path
+#
+# Recommendation:
+#   Use root: repos when the manifest repo itself is your workspace root.
 
 root: ..
 

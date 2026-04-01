@@ -1,5 +1,5 @@
 # Example workspace: small Go ecosystem projects
-# Run: cd examples && ws setup
+# Run: cd example && ws setup
 
 remotes:
   default: https://github.com/charmbracelet
