@@ -14,11 +14,19 @@ var version = "dev"
 func main() {
 	args := os.Args[1:]
 	cmd := "help"
+	var wsHomeOverride string
+
+	// Parse global flags before command
+	for len(args) > 0 {
+		if (args[0] == "-w" || args[0] == "--workspace") && len(args) > 1 {
+			wsHomeOverride = args[1]
+			args = args[2:]
+		} else {
+			break
+		}
+	}
 
 	// Handle "ws -- [filter] <command...>" before normal dispatch.
-	// Everything after -- is treated as a literal command to run across repos,
-	// bypassing built-in command names. Use this when a command name conflicts
-	// with a ws builtin (e.g. "ws -- fetch something").
 	if len(args) > 0 && args[0] == "--" {
 		cmd = "--"
 		args = args[1:]
@@ -51,7 +59,7 @@ func main() {
 		return
 	}
 
-	wsHome, err := findWorkspaceHome()
+	wsHome, err := findWorkspaceHome(wsHomeOverride)
 	if err != nil {
 		fatal(err)
 	}
@@ -180,7 +188,19 @@ func filterArg(args []string, ctx string) string {
 	return ""
 }
 
-func findWorkspaceHome() (string, error) {
+func findWorkspaceHome(override string) (string, error) {
+	// 0. -w flag takes priority
+	if override != "" {
+		abs, err := filepath.Abs(override)
+		if err != nil {
+			return "", err
+		}
+		if _, err := os.Stat(filepath.Join(abs, "manifest.yml")); err == nil {
+			return abs, nil
+		}
+		return "", fmt.Errorf("-w %s: no manifest.yml found there", override)
+	}
+
 	// 1. Check WS_HOME env var
 	if home := os.Getenv("WS_HOME"); home != "" {
 		abs, err := filepath.Abs(home)
@@ -213,7 +233,7 @@ func findWorkspaceHome() (string, error) {
 }
 
 func usage() {
-	fmt.Print(`Usage: ws <command> [args]
+	fmt.Print(`Usage: ws [-w <path>] <command> [args]
 
 Commands:
   ll [filter]            Dashboard: branch, dirty, last commit
