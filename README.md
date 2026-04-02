@@ -60,7 +60,6 @@ code/
 │   ├── manifest.yml
 │   ├── manifest.local.yml      # optional, ignored
 │   ├── .ws-context             # generated, ignored
-│   ├── .ws-context.resolved    # generated, ignored
 │   ├── .scope/                 # generated symlinks, ignored
 │   └── ws.code-workspace       # generated, ignored
 ├── api-server/
@@ -77,7 +76,6 @@ A typical `.gitignore` for the recommended sibling-checkout layout:
 ```gitignore
 .scope/
 .ws-context
-.ws-context.resolved
 *.code-workspace
 manifest.local.yml
 ```
@@ -97,7 +95,6 @@ git init
 cat > .gitignore <<'EOF'
 .scope/
 .ws-context
-.ws-context.resolved
 *.code-workspace
 manifest.local.yml
 EOF
@@ -256,7 +253,7 @@ Use groups for named subsets. The default `all` filter includes every active rep
 
 `ws context <filter>` does three things:
 
-1. stores the default filter in `.ws-context`
+1. stores the raw filter plus resolved default scope in `.ws-context`
 2. regenerates the VS Code workspace file for that filter
 3. rebuilds `.scope/` with symlinks to only the repos in scope
 

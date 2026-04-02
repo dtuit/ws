@@ -11,6 +11,7 @@ import (
 	"github.com/dtuit/ws/internal/manifest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestBuildWorkspaceJSON(t *testing.T) {
@@ -560,9 +561,9 @@ repos:
 	require.NoError(t, SetContext(m, wsHome, "backend", false))
 	require.NoError(t, AddContext(m, wsHome, "repo-c,frontend", false))
 
-	data, err := os.ReadFile(filepath.Join(wsHome, contextFile))
-	require.NoError(t, err)
-	assert.Equal(t, "backend,repo-c,frontend\n", string(data))
+	state := readStoredContext(t, wsHome)
+	assert.Equal(t, "backend,repo-c,frontend", state.Raw)
+	assert.Equal(t, []string{"repo-a", "repo-c", "repo-b"}, state.Resolved)
 }
 
 func TestAddContext_NoExistingContextBehavesLikeSetContext(t *testing.T) {
@@ -584,9 +585,9 @@ repos:
 
 	require.NoError(t, AddContext(m, wsHome, "local-repo", false))
 
-	data, err := os.ReadFile(filepath.Join(wsHome, contextFile))
-	require.NoError(t, err)
-	assert.Equal(t, "local-repo\n", string(data))
+	state := readStoredContext(t, wsHome)
+	assert.Equal(t, "local-repo", state.Raw)
+	assert.Equal(t, []string{"local-repo"}, state.Resolved)
 	assertScopeEntries(t, wsHome, "local-repo")
 	assertWorkspaceFolders(t, filepath.Join(wsHome, m.Workspace), "~ workspace", "local-repo")
 }
@@ -610,9 +611,9 @@ repos:
 
 	require.NoError(t, SetContext(m, wsHome, "all", false))
 
-	data, err := os.ReadFile(filepath.Join(wsHome, contextFile))
-	require.NoError(t, err)
-	assert.Equal(t, "all\n", string(data))
+	state := readStoredContext(t, wsHome)
+	assert.Equal(t, "all", state.Raw)
+	assert.Equal(t, []string{"local-repo", "repo-a"}, state.Resolved)
 
 	filter, ok := GetDefaultContext(wsHome)
 	require.True(t, ok)
@@ -640,8 +641,9 @@ repos:
 
 	require.NoError(t, SetContext(m, wsHome, "none", false))
 
-	_, err := os.Stat(filepath.Join(wsHome, contextFile))
-	assert.True(t, os.IsNotExist(err))
+	state := readStoredContext(t, wsHome)
+	assert.Equal(t, "", state.Raw)
+	assert.Equal(t, []string{"local-repo", "repo-a"}, state.Resolved)
 
 	filter, ok := GetDefaultContext(wsHome)
 	require.True(t, ok)
@@ -675,6 +677,26 @@ repos:
 	assert.Equal(t, "repo-a", filter)
 	assertScopeEntries(t, wsHome, "repo-a")
 	assertWorkspaceFolders(t, filepath.Join(wsHome, m.Workspace), "~ workspace", "repo-a")
+}
+
+func TestSetContext_RemovesLegacyResolvedContextFile(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	require.NoError(t, os.WriteFile(filepath.Join(wsHome, legacyResolvedContextFile), []byte("repo-a\n"), 0644))
+
+	require.NoError(t, SetContext(m, wsHome, "all", false))
+
+	_, err = os.Stat(filepath.Join(wsHome, legacyResolvedContextFile))
+	assert.True(t, os.IsNotExist(err))
 }
 
 func TestResolveContextRepos_ExplicitLocalRepoStillIncluded(t *testing.T) {
@@ -793,6 +815,17 @@ func parseManifestYAML(yaml string) (*manifest.Manifest, error) {
 		yaml = "root: repos\n" + yaml
 	}
 	return manifest.Parse([]byte(yaml))
+}
+
+func readStoredContext(t *testing.T, wsHome string) contextState {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join(wsHome, contextFile))
+	require.NoError(t, err)
+
+	var state contextState
+	require.NoError(t, yaml.Unmarshal(data, &state))
+	return state
 }
 
 func loadManifestWithLocal(t *testing.T, wsHome, manifestYAML, localYAML string) *manifest.Manifest {

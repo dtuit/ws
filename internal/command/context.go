@@ -8,11 +8,17 @@ import (
 
 	"github.com/dtuit/ws/internal/git"
 	"github.com/dtuit/ws/internal/manifest"
+	"gopkg.in/yaml.v3"
 )
 
 const contextFile = ".ws-context"
-const resolvedContextFile = ".ws-context.resolved"
+const legacyResolvedContextFile = ".ws-context.resolved"
 const scopeDir = ".scope"
+
+type contextState struct {
+	Raw      string   `yaml:"raw"`
+	Resolved []string `yaml:"resolved"`
+}
 
 // SetContext sets the default filter, regenerates the VS Code workspace,
 // and updates the repos/ symlink directory to match.
@@ -25,10 +31,10 @@ func SetContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bo
 
 	repos := resolveContextRepos(m, wsHome, filter)
 	if filter == "" || filter == "none" || filter == "reset" {
-		os.Remove(path)
-		if err := writeResolvedContext(wsHome, repos); err != nil {
+		if err := writeContextState(path, "", repos); err != nil {
 			return err
 		}
+		removeLegacyResolvedContext(wsHome)
 		fmt.Println("Context cleared.")
 		if err := syncReposDir(wsHome, repos); err != nil {
 			return err
@@ -40,12 +46,10 @@ func SetContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bo
 		return fmt.Errorf("filter %q matched no repos", filter)
 	}
 
-	if err := os.WriteFile(path, []byte(filter+"\n"), 0644); err != nil {
+	if err := writeContextState(path, filter, repos); err != nil {
 		return err
 	}
-	if err := writeResolvedContext(wsHome, repos); err != nil {
-		return err
-	}
+	removeLegacyResolvedContext(wsHome)
 	fmt.Printf("Context set to %q (%d repos)\n", filter, len(repos))
 
 	if err := syncReposDir(wsHome, repos); err != nil {
@@ -77,29 +81,24 @@ func AddContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bo
 
 // GetContext reads the current context filter, or "" if none is set.
 func GetContext(wsHome string) string {
-	data, err := os.ReadFile(filepath.Join(wsHome, contextFile))
-	if err != nil {
+	state, ok, err := readContextState(filepath.Join(wsHome, contextFile))
+	if err != nil || !ok {
 		return ""
 	}
-	return strings.TrimSpace(string(data))
+	return strings.TrimSpace(state.Raw)
 }
 
 // GetDefaultContext returns the resolved default filter when context has been set.
 // The returned bool reports whether a generated default exists.
 func GetDefaultContext(wsHome string) (string, bool) {
-	data, err := os.ReadFile(filepath.Join(wsHome, resolvedContextFile))
-	if err == nil {
-		return strings.TrimSpace(string(data)), true
-	}
-	if !os.IsNotExist(err) {
+	state, ok, err := readContextState(filepath.Join(wsHome, contextFile))
+	if err != nil || !ok {
 		return "", false
 	}
-
-	raw := GetContext(wsHome)
-	if raw == "" {
-		return "", false
+	if len(state.Resolved) == 0 {
+		return manifest.EmptyFilter, true
 	}
-	return raw, true
+	return strings.Join(state.Resolved, ","), true
 }
 
 // ShowContext displays the current context.
@@ -248,21 +247,51 @@ func mergeContextFilters(current, addition string) string {
 	return strings.Join(merged, ",")
 }
 
-func writeResolvedContext(wsHome string, repos []manifest.RepoInfo) error {
-	filter := resolvedContextFilter(repos)
-	return os.WriteFile(filepath.Join(wsHome, resolvedContextFile), []byte(filter+"\n"), 0644)
+func readContextState(path string) (contextState, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return contextState{}, false, nil
+		}
+		return contextState{}, false, err
+	}
+
+	var state contextState
+	if err := yaml.Unmarshal(data, &state); err != nil {
+		return contextState{}, false, err
+	}
+	return state, true, nil
 }
 
-func resolvedContextFilter(repos []manifest.RepoInfo) string {
+func writeContextState(path, raw string, repos []manifest.RepoInfo) error {
+	state := contextState{
+		Raw:      raw,
+		Resolved: resolvedContextNames(repos),
+	}
+	data, err := yaml.Marshal(&state)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+func resolvedContextNames(repos []manifest.RepoInfo) []string {
 	if len(repos) == 0 {
-		return manifest.EmptyFilter
+		return nil
 	}
 
 	names := make([]string, 0, len(repos))
 	for _, repo := range repos {
 		names = append(names, repo.Name)
 	}
-	return strings.Join(names, ",")
+	return names
+}
+
+func removeLegacyResolvedContext(wsHome string) {
+	path := filepath.Join(wsHome, legacyResolvedContextFile)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", legacyResolvedContextFile, err)
+	}
 }
 
 func resolvedContextCount(filter string) int {
