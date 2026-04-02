@@ -2,4 +2,5 @@
 repos/
 *.code-workspace
 .ws-context
+.ws-context.resolved
 manifest.local.yml

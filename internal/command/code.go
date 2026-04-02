@@ -11,11 +11,9 @@ import (
 	"github.com/dtuit/ws/internal/manifest"
 )
 
-// Code generates a VS Code workspace file and opens it.
-func Code(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) error {
-	repos := m.ResolveFilter(filter, wsHome)
-
+func writeWorkspace(m *manifest.Manifest, wsHome string, repos []manifest.RepoInfo, includeWorktrees bool) error {
 	wsFile := filepath.Join(wsHome, m.Workspace)
+	worktreeCount := workspaceWorktreeCount(repos, wsHome)
 
 	ws := buildWorkspace(repos, wsHome, includeWorktrees)
 
@@ -33,14 +31,30 @@ func Code(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) er
 		return err
 	}
 
-	fmt.Printf("Generated %s (%d repos)\n", m.Workspace, len(repos))
+	fmt.Println(workspaceSummary(m.Workspace, len(repos), worktreeCount, includeWorktrees))
+	return nil
+}
 
-	// Open in VS Code if available
-	if codeBin, err := exec.LookPath("code"); err == nil {
-		cmd := exec.Command(codeBin, wsFile)
-		cmd.Start()
+// Open opens the generated VS Code workspace file.
+func Open(m *manifest.Manifest, wsHome string) error {
+	wsFile := filepath.Join(wsHome, m.Workspace)
+	if _, err := os.Stat(wsFile); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%s not found; run `ws context ...` first", m.Workspace)
+		}
+		return err
 	}
 
+	codeBin, err := exec.LookPath("code")
+	if err != nil {
+		return fmt.Errorf("VS Code `code` command not found in PATH")
+	}
+
+	cmd := exec.Command(codeBin, wsFile)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	fmt.Printf("Opened %s\n", m.Workspace)
 	return nil
 }
 
@@ -129,6 +143,30 @@ func orderedWorktreePaths(primary string, paths []string) []string {
 		ordered = append(ordered, path)
 	}
 	return ordered
+}
+
+func workspaceWorktreeCount(repos []manifest.RepoInfo, wsHome string) int {
+	count := 0
+	for _, repo := range repos {
+		count += len(repoFolders(repo, wsHome, true)) - 1
+	}
+	return count
+}
+
+func workspaceSummary(workspace string, repoCount, worktreeCount int, includeWorktrees bool) string {
+	repoLabel := "repos"
+	if repoCount == 1 {
+		repoLabel = "repo"
+	}
+
+	if includeWorktrees {
+		if worktreeCount == 1 {
+			return fmt.Sprintf("Generated VS Code workspace %s (%d %s, 1 worktree)", workspace, repoCount, repoLabel)
+		}
+		return fmt.Sprintf("Generated VS Code workspace %s (%d %s, %d worktrees)", workspace, repoCount, repoLabel, worktreeCount)
+	}
+
+	return fmt.Sprintf("Generated VS Code workspace %s (%d %s, worktrees disabled)", workspace, repoCount, repoLabel)
 }
 
 func relWorkspacePath(wsHome, path string) string {

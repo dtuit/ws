@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dtuit/ws/internal/git"
 	"github.com/dtuit/ws/internal/manifest"
 )
 
 const contextFile = ".ws-context"
+const resolvedContextFile = ".ws-context.resolved"
 const scopeDir = ".scope"
 
 // SetContext sets the default filter, regenerates the VS Code workspace,
@@ -21,29 +23,35 @@ func SetContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bo
 		return err
 	}
 
+	repos := resolveContextRepos(m, wsHome, filter)
 	if filter == "" || filter == "none" || filter == "reset" {
 		os.Remove(path)
-		fmt.Println("Context cleared.")
-		if err := syncReposDir(m, wsHome, ""); err != nil {
+		if err := writeResolvedContext(wsHome, repos); err != nil {
 			return err
 		}
-		return Code(m, wsHome, "", includeWorktrees)
+		fmt.Println("Context cleared.")
+		if err := syncReposDir(wsHome, repos); err != nil {
+			return err
+		}
+		return writeWorkspace(m, wsHome, repos, includeWorktrees)
 	}
 
-	repos := m.ResolveFilter(filter, wsHome)
-	if len(repos) == 0 {
+	if len(repos) == 0 && filter != "all" {
 		return fmt.Errorf("filter %q matched no repos", filter)
 	}
 
 	if err := os.WriteFile(path, []byte(filter+"\n"), 0644); err != nil {
 		return err
 	}
-	fmt.Printf("Context set to %q (%d repos)\n", filter, len(repos))
-
-	if err := syncReposDir(m, wsHome, filter); err != nil {
+	if err := writeResolvedContext(wsHome, repos); err != nil {
 		return err
 	}
-	return Code(m, wsHome, filter, includeWorktrees)
+	fmt.Printf("Context set to %q (%d repos)\n", filter, len(repos))
+
+	if err := syncReposDir(wsHome, repos); err != nil {
+		return err
+	}
+	return writeWorkspace(m, wsHome, repos, includeWorktrees)
 }
 
 // AddContext extends the current context with more groups or repos.
@@ -76,11 +84,33 @@ func GetContext(wsHome string) string {
 	return strings.TrimSpace(string(data))
 }
 
+// GetDefaultContext returns the resolved default filter when context has been set.
+// The returned bool reports whether a generated default exists.
+func GetDefaultContext(wsHome string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(wsHome, resolvedContextFile))
+	if err == nil {
+		return strings.TrimSpace(string(data)), true
+	}
+	if !os.IsNotExist(err) {
+		return "", false
+	}
+
+	raw := GetContext(wsHome)
+	if raw == "" {
+		return "", false
+	}
+	return raw, true
+}
+
 // ShowContext displays the current context.
 func ShowContext(m *manifest.Manifest, wsHome string) {
 	ctx := GetContext(wsHome)
 	if ctx == "" {
-		fmt.Println("No context set (using all grouped repos)")
+		if resolved, ok := GetDefaultContext(wsHome); ok {
+			fmt.Printf("No context set (%d cloned repos on disk)\n", resolvedContextCount(resolved))
+			return
+		}
+		fmt.Println("No context set (using all repos)")
 		return
 	}
 	normalized, err := normalizeContextFilter(m, ctx)
@@ -89,17 +119,16 @@ func ShowContext(m *manifest.Manifest, wsHome string) {
 		return
 	}
 	if normalized == "" {
-		fmt.Println("No context set (using all grouped repos)")
+		fmt.Println("No context set (using all repos)")
 		return
 	}
-	repos := m.ResolveFilter(normalized, wsHome)
+	repos := resolveContextRepos(m, wsHome, normalized)
 	fmt.Printf("Context: %s (%d repos)\n", normalized, len(repos))
 }
 
 // syncReposDir creates/updates a repos/ directory with symlinks to the scoped repos.
 // This constrains what filesystem-based agents (CLI tools, Claude Code) can see.
-func syncReposDir(m *manifest.Manifest, wsHome, filter string) error {
-	repos := m.ResolveFilter(filter, wsHome)
+func syncReposDir(wsHome string, repos []manifest.RepoInfo) error {
 	dir := filepath.Join(wsHome, scopeDir)
 
 	// Remove existing symlinks (but not non-symlink entries, for safety)
@@ -134,6 +163,14 @@ func syncReposDir(m *manifest.Manifest, wsHome, filter string) error {
 
 	fmt.Printf(".scope/ updated (%d symlinks)\n", len(repos))
 	return nil
+}
+
+func resolveContextRepos(m *manifest.Manifest, wsHome, filter string) []manifest.RepoInfo {
+	repos := m.ResolveFilter(filter, wsHome)
+	if filter == "" || filter == "all" {
+		return clonedRepos(repos)
+	}
+	return repos
 }
 
 func normalizeContextFilter(m *manifest.Manifest, filter string) (string, error) {
@@ -209,4 +246,38 @@ func mergeContextFilters(current, addition string) string {
 		}
 	}
 	return strings.Join(merged, ",")
+}
+
+func writeResolvedContext(wsHome string, repos []manifest.RepoInfo) error {
+	filter := resolvedContextFilter(repos)
+	return os.WriteFile(filepath.Join(wsHome, resolvedContextFile), []byte(filter+"\n"), 0644)
+}
+
+func resolvedContextFilter(repos []manifest.RepoInfo) string {
+	if len(repos) == 0 {
+		return manifest.EmptyFilter
+	}
+
+	names := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		names = append(names, repo.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+func resolvedContextCount(filter string) int {
+	if filter == "" || filter == manifest.EmptyFilter {
+		return 0
+	}
+	return len(strings.Split(filter, ","))
+}
+
+func clonedRepos(repos []manifest.RepoInfo) []manifest.RepoInfo {
+	filtered := make([]manifest.RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if git.IsCheckout(repo.Path) {
+			filtered = append(filtered, repo)
+		}
+	}
+	return filtered
 }

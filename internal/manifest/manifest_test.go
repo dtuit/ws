@@ -96,15 +96,14 @@ func TestResolveFilter_All(t *testing.T) {
 
 	repos := m.ResolveFilter("all", testWSHome)
 	names := repoNames(repos)
-	// Should contain all repos that are in at least one group
+	// Should contain all active repos from the merged manifest, grouped or not.
 	assert.Contains(t, names, "api-server")
 	assert.Contains(t, names, "auth-service")
 	assert.Contains(t, names, "worker")
 	assert.Contains(t, names, "web-app")
 	assert.Contains(t, names, "admin-dashboard")
-	// Should NOT contain repos not in any group
-	assert.NotContains(t, names, "custom-tool")
-	assert.NotContains(t, names, "upstream-lib")
+	assert.Contains(t, names, "custom-tool")
+	assert.Contains(t, names, "upstream-lib")
 }
 
 func TestResolveFilter_GroupName(t *testing.T) {
@@ -141,8 +140,30 @@ func TestResolveFilter_Empty(t *testing.T) {
 	require.NoError(t, err)
 
 	repos := m.ResolveFilter("", testWSHome)
-	// Same as "all" - returns grouped repos
-	assert.Len(t, repos, 5)
+	// Same as "all" - returns all active repos
+	assert.Len(t, repos, 7)
+}
+
+func TestResolveFilter_AllIncludesMergedLocalRepos(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yml"), []byte(`
+root: repos
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+  repo-b:
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.local.yml"), []byte(`
+repos:
+  local-repo:
+`), 0644))
+
+	m, err := LoadWithLocal(dir)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"local-repo", "repo-a", "repo-b"}, repoNames(m.ResolveFilter("all", dir)))
+	assert.Equal(t, []string{"local-repo", "repo-a", "repo-b"}, repoNames(m.ResolveFilter("", dir)))
 }
 
 func TestAllRepos(t *testing.T) {
@@ -287,6 +308,7 @@ func TestParse_RejectsPathTraversalRepoName(t *testing.T) {
 	tests := []string{
 		"../../etc/evil",
 		"../parent",
+		"comma,name",
 		"sub/dir",
 		"back\\slash",
 		"..",
@@ -300,6 +322,18 @@ func TestParse_RejectsPathTraversalRepoName(t *testing.T) {
 			assert.Error(t, err, "expected error for repo name %q", name)
 		})
 	}
+}
+
+func TestParse_RejectsCommaGroupName(t *testing.T) {
+	_, err := Parse([]byte(`
+remotes:
+  default: git@example.com
+groups:
+  comma,group: [repo-a]
+repos:
+  repo-a:
+`))
+	assert.Error(t, err)
 }
 
 func TestValidateURL(t *testing.T) {

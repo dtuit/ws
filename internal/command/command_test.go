@@ -114,6 +114,48 @@ func TestBuildWorkspaceJSON_IncludesGitWorktrees(t *testing.T) {
 	assert.Equal(t, "repo-feature", second["path"])
 }
 
+func TestWorkspaceSummary_WorktreesDisabled(t *testing.T) {
+	assert.Equal(t,
+		"Generated VS Code workspace ws.code-workspace (1 repo, worktrees disabled)",
+		workspaceSummary("ws.code-workspace", 1, 3, false),
+	)
+}
+
+func TestWorkspaceSummary_WorktreesEnabled(t *testing.T) {
+	assert.Equal(t,
+		"Generated VS Code workspace ws.code-workspace (2 repos, 3 worktrees)",
+		workspaceSummary("ws.code-workspace", 2, 3, true),
+	)
+}
+
+func TestCDPath_SelectsWorktreeByBasename(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+
+	wsHome := t.TempDir()
+	repoDir := filepath.Join(wsHome, "repo")
+	worktreeDir := filepath.Join(wsHome, "repo-feature")
+
+	runGit(t, wsHome, "init", "repo")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello\n"), 0644))
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "init")
+	runGit(t, repoDir, "worktree", "add", "-b", "feature", worktreeDir)
+
+	repo := manifest.RepoInfo{
+		Name:   "repo",
+		Path:   repoDir,
+		Branch: "master",
+	}
+
+	path, err := CDPath(repo, "repo-feature")
+	require.NoError(t, err)
+	assert.Equal(t, worktreeDir, path)
+}
+
 func TestParseSuperArgs_WithGroup(t *testing.T) {
 	m, err := manifest.Parse([]byte(`
 remotes:
@@ -263,6 +305,7 @@ repos:
 
 	result := Complete(m, []string{""}, 0)
 	assert.Contains(t, result.Values, "ll")
+	assert.Contains(t, result.Values, "open")
 	assert.Contains(t, result.Values, "backend")
 	assert.Contains(t, result.Values, "repo-a")
 	assert.Contains(t, result.Values, "--workspace")
@@ -307,41 +350,6 @@ repos:
 	assert.Contains(t, result.Values, "--install-shell")
 	assert.Contains(t, result.Values, "ai")
 	assert.Contains(t, result.Values, "all")
-}
-
-func TestCompleteCodeIncludesWorktreesFlagAndFilters(t *testing.T) {
-	m, err := manifest.Parse([]byte(`
-remotes:
-  default: git@example.com
-groups:
-  ai: [repo-a]
-repos:
-  repo-a:
-`))
-	require.NoError(t, err)
-
-	result := Complete(m, []string{"code", ""}, 1)
-	assert.Contains(t, result.Values, "-W")
-	assert.Contains(t, result.Values, "-t")
-	assert.Contains(t, result.Values, "--no-worktrees")
-	assert.Contains(t, result.Values, "--worktrees")
-	assert.Contains(t, result.Values, "ai")
-}
-
-func TestCompleteCodeAfterWorktreesFlagSuggestsFilters(t *testing.T) {
-	m, err := manifest.Parse([]byte(`
-remotes:
-  default: git@example.com
-groups:
-  ai: [repo-a]
-repos:
-  repo-a:
-`))
-	require.NoError(t, err)
-
-	result := Complete(m, []string{"code", "-t", ""}, 2)
-	assert.Contains(t, result.Values, "ai")
-	assert.NotContains(t, result.Values, "--worktrees")
 }
 
 func TestCompleteLLIncludesWorktreesFlagAndFilters(t *testing.T) {
@@ -508,10 +516,11 @@ groups:
   backend: [repo-a]
 repos:
   repo-a:
+  repo-b:
 `))
 	require.NoError(t, err)
 
-	filter, err := normalizeContextFilter(m, "backend,all")
+	filter, err := normalizeContextFilter(m, "repo-b,all")
 	require.NoError(t, err)
 	assert.Equal(t, "all", filter)
 }
@@ -547,12 +556,166 @@ repos:
 `))
 	require.NoError(t, err)
 
-	require.NoError(t, AddContext(m, wsHome, "backend", false))
+	require.NoError(t, SetContext(m, wsHome, "backend", false))
 	require.NoError(t, AddContext(m, wsHome, "repo-c,frontend", false))
 
 	data, err := os.ReadFile(filepath.Join(wsHome, contextFile))
 	require.NoError(t, err)
 	assert.Equal(t, "backend,repo-c,frontend\n", string(data))
+}
+
+func TestAddContext_NoExistingContextBehavesLikeSetContext(t *testing.T) {
+	wsHome := t.TempDir()
+	m := loadManifestWithLocal(t, wsHome, `
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+groups:
+  backend: [repo-a, repo-b]
+repos:
+  repo-a:
+  repo-b:
+`, `
+repos:
+  local-repo:
+`)
+
+	require.NoError(t, AddContext(m, wsHome, "local-repo", false))
+
+	data, err := os.ReadFile(filepath.Join(wsHome, contextFile))
+	require.NoError(t, err)
+	assert.Equal(t, "local-repo\n", string(data))
+	assertScopeEntries(t, wsHome, "local-repo")
+	assertWorkspaceFolders(t, filepath.Join(wsHome, m.Workspace), "~ workspace", "local-repo")
+}
+
+func TestSetContextAll_UsesOnlyClonedReposInResolvedScope(t *testing.T) {
+	wsHome := t.TempDir()
+	m := loadManifestWithLocal(t, wsHome, `
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+  repo-b:
+`, `
+repos:
+  local-repo:
+`)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	initCheckout(t, filepath.Join(wsHome, "repos", "local-repo"))
+
+	require.NoError(t, SetContext(m, wsHome, "all", false))
+
+	data, err := os.ReadFile(filepath.Join(wsHome, contextFile))
+	require.NoError(t, err)
+	assert.Equal(t, "all\n", string(data))
+
+	filter, ok := GetDefaultContext(wsHome)
+	require.True(t, ok)
+	assert.Equal(t, "local-repo,repo-a", filter)
+	assertScopeEntries(t, wsHome, "local-repo", "repo-a")
+	assertWorkspaceFolders(t, filepath.Join(wsHome, m.Workspace), "~ workspace", "local-repo", "repo-a")
+}
+
+func TestSetContextNone_UsesOnlyClonedReposInResolvedScope(t *testing.T) {
+	wsHome := t.TempDir()
+	m := loadManifestWithLocal(t, wsHome, `
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+  repo-b:
+`, `
+repos:
+  local-repo:
+`)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	initCheckout(t, filepath.Join(wsHome, "repos", "local-repo"))
+
+	require.NoError(t, SetContext(m, wsHome, "none", false))
+
+	_, err := os.Stat(filepath.Join(wsHome, contextFile))
+	assert.True(t, os.IsNotExist(err))
+
+	filter, ok := GetDefaultContext(wsHome)
+	require.True(t, ok)
+	assert.Equal(t, "local-repo,repo-a", filter)
+	assertScopeEntries(t, wsHome, "local-repo", "repo-a")
+	assertWorkspaceFolders(t, filepath.Join(wsHome, m.Workspace), "~ workspace", "local-repo", "repo-a")
+}
+
+func TestSetContextFailureDoesNotOverwriteResolvedScope(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := manifest.Parse([]byte(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+groups:
+  empty: []
+repos:
+  repo-a:
+`))
+	require.NoError(t, err)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+
+	require.NoError(t, SetContext(m, wsHome, "all", false))
+
+	err = SetContext(m, wsHome, "empty", false)
+	require.Error(t, err)
+
+	filter, ok := GetDefaultContext(wsHome)
+	require.True(t, ok)
+	assert.Equal(t, "repo-a", filter)
+	assertScopeEntries(t, wsHome, "repo-a")
+	assertWorkspaceFolders(t, filepath.Join(wsHome, m.Workspace), "~ workspace", "repo-a")
+}
+
+func TestResolveContextRepos_ExplicitLocalRepoStillIncluded(t *testing.T) {
+	wsHome := t.TempDir()
+	m := loadManifestWithLocal(t, wsHome, `
+root: repos
+remotes:
+  default: git@example.com
+groups:
+  backend: [repo-a]
+repos:
+  repo-a:
+`, `
+repos:
+  local-repo:
+groups:
+  local: [local-repo]
+`)
+
+	repos := resolveContextRepos(m, wsHome, "local-repo")
+	require.Len(t, repos, 1)
+	assert.Equal(t, "local-repo", repos[0].Name)
+}
+
+func TestResolveContextRepos_AllIncludesOnlyClonedRepos(t *testing.T) {
+	wsHome := t.TempDir()
+	m := loadManifestWithLocal(t, wsHome, `
+root: repos
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+  repo-b:
+`, `
+repos:
+  local-repo:
+`)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	initCheckout(t, filepath.Join(wsHome, "repos", "local-repo"))
+
+	repos := resolveContextRepos(m, wsHome, "all")
+	assert.Equal(t, []string{"local-repo", "repo-a"}, repoNames(repos))
 }
 
 func TestCompleteGroupCommandFallsBackToCommands(t *testing.T) {
@@ -570,10 +733,124 @@ repos:
 	assert.True(t, result.FallbackCommands)
 }
 
+func TestCompleteGroupCommandDelegatesAfterCommandWord(t *testing.T) {
+	m, err := manifest.Parse([]byte(`
+remotes:
+  default: git@example.com
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+`))
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"ai", "git", ""}, 2)
+	assert.True(t, result.DelegateCommands)
+	assert.Equal(t, 1, result.DelegateStart)
+}
+
+func TestCompletePassthroughDelegatesAfterCommandWord(t *testing.T) {
+	m, err := manifest.Parse([]byte(`
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+`))
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"git", "branch", ""}, 2)
+	assert.True(t, result.DelegateCommands)
+	assert.Equal(t, 0, result.DelegateStart)
+}
+
+func TestCompleteEscapedPassthroughDelegatesAfterCommandWord(t *testing.T) {
+	m, err := manifest.Parse([]byte(`
+remotes:
+  default: git@example.com
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+`))
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"--", "ai", "git", "branch", ""}, 4)
+	assert.True(t, result.DelegateCommands)
+	assert.Equal(t, 2, result.DelegateStart)
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v failed: %s", args, string(output))
+}
+
+func loadManifestWithLocal(t *testing.T, wsHome, manifestYAML, localYAML string) *manifest.Manifest {
+	t.Helper()
+
+	require.NoError(t, os.WriteFile(filepath.Join(wsHome, "manifest.yml"), []byte(manifestYAML), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(wsHome, "manifest.local.yml"), []byte(localYAML), 0644))
+
+	m, err := manifest.LoadWithLocal(wsHome)
+	require.NoError(t, err)
+	return m
+}
+
+func initCheckout(t *testing.T, repoPath string) {
+	t.Helper()
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(repoPath), 0755))
+	runGit(t, filepath.Dir(repoPath), "init", filepath.Base(repoPath))
+	runGit(t, repoPath, "config", "user.name", "Test User")
+	runGit(t, repoPath, "config", "user.email", "test@example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("hello\n"), 0644))
+	runGit(t, repoPath, "add", "README.md")
+	runGit(t, repoPath, "commit", "-m", "init")
+}
+
+func assertScopeEntries(t *testing.T, wsHome string, want ...string) {
+	t.Helper()
+
+	entries, err := os.ReadDir(filepath.Join(wsHome, scopeDir))
+	require.NoError(t, err)
+
+	var got []string
+	for _, entry := range entries {
+		got = append(got, entry.Name())
+	}
+	assert.Equal(t, want, got)
+}
+
+func assertWorkspaceFolders(t *testing.T, workspacePath string, want ...string) {
+	t.Helper()
+
+	data, err := os.ReadFile(workspacePath)
+	require.NoError(t, err)
+
+	var ws map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &ws))
+
+	folders, ok := ws["folders"].([]interface{})
+	require.True(t, ok)
+
+	var got []string
+	for _, raw := range folders {
+		folder, ok := raw.(map[string]interface{})
+		require.True(t, ok)
+		name, ok := folder["name"].(string)
+		require.True(t, ok)
+		got = append(got, name)
+	}
+
+	assert.Equal(t, want, got)
+}
+
+func repoNames(repos []manifest.RepoInfo) []string {
+	names := make([]string, len(repos))
+	for i, repo := range repos {
+		names[i] = repo.Name
+	}
+	return names
 }

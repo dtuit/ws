@@ -2,11 +2,14 @@ package command
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/dtuit/ws/internal/git"
 	"github.com/dtuit/ws/internal/manifest"
 	"github.com/dtuit/ws/internal/term"
 )
+
+const llWorktreeSuffixColor = term.Bold + term.Cyan
 
 // LL displays a dashboard of repo status: branch, dirty state, last commit.
 func LL(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) error {
@@ -42,9 +45,9 @@ func LL(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) erro
 	}
 
 	for _, s := range statuses {
+		nameStr := formatLLName(s.Name, maxName, term.Red)
 		if s.Err != nil {
-			fmt.Printf("%-*s  %s\n", maxName, s.Name,
-				term.Colorize(term.Red, s.Err.Error()))
+			fmt.Printf("%s  %s\n", nameStr, term.Colorize(term.Red, s.Err.Error()))
 			continue
 		}
 
@@ -89,9 +92,21 @@ func LL(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) erro
 			extras = " " + term.Colorize(term.Dim, fmt.Sprintf("[+%d wt]", extra))
 		}
 
-		fmt.Printf("%s  %s%s\n",
-			term.Colorize(color, fmt.Sprintf("%-*s  %-*s %s[%s]", maxName, s.Name, maxBranch, s.Branch, syncStr, symbolStr)),
-			msg, age+extras)
+		nameStr = formatLLName(s.Name, maxName, color)
+		statusStr := term.Colorize(color, fmt.Sprintf("  %-*s %s[%s]", maxBranch, s.Branch, syncStr, symbolStr))
+		fmt.Printf("%s%s  %s%s\n", nameStr, statusStr, msg, age+extras)
 	}
 	return nil
+}
+
+func formatLLName(name string, width int, color string) string {
+	padding := width - len(name)
+	if padding < 0 {
+		padding = 0
+	}
+	base, suffix, ok := strings.Cut(name, "@")
+	if !ok {
+		return term.Colorize(color, name) + strings.Repeat(" ", padding)
+	}
+	return term.Colorize(color, base) + term.Colorize(llWorktreeSuffixColor, "@"+suffix) + strings.Repeat(" ", padding)
 }

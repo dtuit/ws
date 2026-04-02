@@ -14,7 +14,7 @@ var builtInCommands = []string{
 	"ll",
 	"cd",
 	"setup",
-	"code",
+	"open",
 	"list",
 	"fetch",
 	"pull",
@@ -25,6 +25,8 @@ var builtInCommands = []string{
 type CompletionResult struct {
 	Values           []string
 	FallbackCommands bool
+	DelegateCommands bool
+	DelegateStart    int
 }
 
 // Complete returns shell completion candidates for ws arguments.
@@ -71,8 +73,8 @@ func Complete(m *manifest.Manifest, words []string, current int) CompletionResul
 	case "setup":
 		values := append([]string{"--install-shell"}, filterSuggestions(m)...)
 		return finalizeCompletion(values, currentWord, false)
-	case "code":
-		return completeCode(m, args, argIndex)
+	case "open":
+		return CompletionResult{}
 	case "ll", "pull":
 		return completeFilterCommand(m, args, argIndex, worktreesFlagSuggestions())
 	case "fetch":
@@ -102,11 +104,13 @@ func completeDefaultPassthrough(m *manifest.Manifest, words []string, current in
 	if isFilterToken(m, words[0]) && current == 1 {
 		return CompletionResult{FallbackCommands: true}
 	}
+	if isFilterToken(m, words[0]) && current > 1 {
+		return CompletionResult{DelegateCommands: true, DelegateStart: 1}
+	}
+	if !isFilterToken(m, words[0]) && current > 0 {
+		return CompletionResult{DelegateCommands: true, DelegateStart: 0}
+	}
 	return CompletionResult{}
-}
-
-func completeCode(m *manifest.Manifest, args []string, current int) CompletionResult {
-	return completeFilterCommand(m, args, current, worktreesFlagSuggestions())
 }
 
 func completeFilterCommand(m *manifest.Manifest, args []string, current int, flags []string) CompletionResult {
@@ -188,23 +192,38 @@ func completePassthrough(m *manifest.Manifest, args []string, current int) Compl
 	if current < 0 {
 		return CompletionResult{}
 	}
-	if current == 0 {
-		values := append(worktreesFlagSuggestions(), filterSuggestions(m)...)
-		return finalizeCompletion(values, args[0], true)
+	start := superCommandStart(m, args)
+	if start < 0 {
+		return CompletionResult{}
 	}
-	if len(args) > 0 && isWorktreesFlag(args[0]) {
-		if current == 1 {
-			return finalizeCompletion(filterSuggestions(m), args[1], true)
+	if current < start {
+		if current == 0 {
+			values := append(worktreesFlagSuggestions(), filterSuggestions(m)...)
+			return finalizeCompletion(values, args[0], true)
 		}
-		if len(args) > 1 && isFilterToken(m, args[1]) && current == 2 {
-			return CompletionResult{FallbackCommands: true}
+		if len(args) > 0 && isWorktreesFlag(args[0]) && current == 1 {
+			return finalizeCompletion(filterSuggestions(m), args[1], true)
 		}
 		return CompletionResult{}
 	}
-	if len(args) > 0 && isFilterToken(m, args[0]) && current == 1 {
+	if current == start {
 		return CompletionResult{FallbackCommands: true}
 	}
-	return CompletionResult{}
+	return CompletionResult{DelegateCommands: true, DelegateStart: start + 1}
+}
+
+func superCommandStart(m *manifest.Manifest, args []string) int {
+	for i, arg := range args {
+		switch {
+		case isWorktreesFlag(arg):
+			continue
+		case isFilterToken(m, arg):
+			continue
+		default:
+			return i
+		}
+	}
+	return -1
 }
 
 func firstCommandIndex(words []string) int {

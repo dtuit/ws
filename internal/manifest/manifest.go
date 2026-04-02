@@ -53,6 +53,7 @@ type rawManifest struct {
 }
 
 const maxManifestSize = 1 << 20 // 1MB
+const EmptyFilter = "__ws_empty__"
 
 // Load reads and parses a manifest YAML file.
 func Load(path string) (*Manifest, error) {
@@ -103,6 +104,11 @@ func Parse(data []byte) (*Manifest, error) {
 	if m.Groups == nil {
 		m.Groups = make(map[string][]string)
 	}
+	for name := range m.Groups {
+		if err := validateName(name); err != nil {
+			return nil, fmt.Errorf("group %q: %w", name, err)
+		}
+	}
 
 	for name, url := range raw.Remotes {
 		m.Remotes[name] = url
@@ -130,6 +136,9 @@ func Parse(data []byte) (*Manifest, error) {
 func validateName(name string) error {
 	if name == "" || name == "." || name == ".." {
 		return fmt.Errorf("invalid name")
+	}
+	if strings.Contains(name, ",") {
+		return fmt.Errorf("must not contain commas")
 	}
 	if strings.ContainsAny(name, "/\\") {
 		return fmt.Errorf("must not contain path separators")
@@ -325,44 +334,20 @@ func (m *Manifest) AllRepos(wsHome string) []RepoInfo {
 }
 
 // ResolveFilter resolves a filter string into an ordered list of RepoInfo.
-// "" or "all" → all repos in any group. Group name → group members. Comma-separated → union.
+// "" or "all" → all active repos from the merged manifest. Group name → group members. Comma-separated → union.
 // wsHome is the directory containing the manifest, used to resolve repo paths.
 func (m *Manifest) ResolveFilter(filter, wsHome string) []RepoInfo {
 	active := m.ActiveRepos()
 	repoGroups := m.RepoGroups()
-
+	if filter == EmptyFilter {
+		return nil
+	}
 	if filter == "" || filter == "all" {
-		// Return all repos that belong to at least one group
-		seen := make(map[string]bool)
-		var result []RepoInfo
-		// Collect from all groups in sorted group order for determinism
-		groupNames := make([]string, 0, len(m.Groups))
-		for g := range m.Groups {
-			groupNames = append(groupNames, g)
-		}
-		sort.Strings(groupNames)
-		for _, g := range groupNames {
-			for _, name := range m.Groups[g] {
-				if _, ok := active[name]; ok && !seen[name] {
-					cfg := active[name]
-					result = append(result, RepoInfo{
-						Name:   name,
-						URL:    m.ResolveURL(name, cfg),
-						Branch: m.ResolveBranch(cfg),
-						Groups: repoGroups[name],
-						Path:   m.ResolvePath(wsHome, name, cfg),
-					})
-					seen[name] = true
-				}
-			}
-		}
-		sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
-		return result
+		return m.AllRepos(wsHome)
 	}
 
 	seen := make(map[string]bool)
 	var result []RepoInfo
-
 	for _, token := range strings.Split(filter, ",") {
 		token = strings.TrimSpace(token)
 		if members, ok := m.Groups[token]; ok {

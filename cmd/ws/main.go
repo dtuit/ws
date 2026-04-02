@@ -71,8 +71,9 @@ dispatch:
 		fatal(err)
 	}
 
-	// Context: use as default filter when no explicit filter is given
-	ctx := command.GetContext(wsHome)
+	// Context: use the resolved scoped repos as the default filter when present.
+	rawCtx := command.GetContext(wsHome)
+	defaultFilter, hasDefaultFilter := command.GetDefaultContext(wsHome)
 	defaultWorktrees := m.Worktrees
 
 	switch cmd {
@@ -103,7 +104,12 @@ dispatch:
 			if err != nil {
 				fatal(err)
 			}
-			cfg, ok := m.ActiveRepos()[name]
+			active := m.ActiveRepos()
+			name, selector, err = resolveCDTarget(name, selector, active)
+			if err != nil {
+				fatal(err)
+			}
+			cfg, ok := active[name]
 			if !ok {
 				fatal(fmt.Errorf("unknown repo: %s", name))
 			}
@@ -131,18 +137,16 @@ dispatch:
 				filterArgs = append(filterArgs, a)
 			}
 		}
-		filter := filterArg(filterArgs, ctx)
+		filter := filterArg(filterArgs, rawCtx, rawCtx != "")
 		if err := command.Setup(m, wsHome, filter, installShell); err != nil {
 			fatal(err)
 		}
 
-	case "code":
-		filter, worktreesOverride, err := parseCodeArgs(args, ctx)
-		if err != nil {
-			fatal(err)
+	case "open":
+		if len(args) > 0 {
+			fatal(fmt.Errorf("usage: ws open"))
 		}
-		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, worktreesOverride)
-		if err := command.Code(m, wsHome, filter, includeWorktrees); err != nil {
+		if err := command.Open(m, wsHome); err != nil {
 			fatal(err)
 		}
 
@@ -160,21 +164,21 @@ dispatch:
 
 	case "ll":
 		args, localWorktrees := command.StripWorktreesFlags(args)
-		filter := filterArg(args, ctx)
+		filter := filterArg(args, defaultFilter, hasDefaultFilter)
 		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
 		if err := command.LL(m, wsHome, filter, includeWorktrees); err != nil {
 			fatal(err)
 		}
 
 	case "fetch":
-		filter := filterArg(args, ctx)
+		filter := filterArg(args, defaultFilter, hasDefaultFilter)
 		if err := command.Fetch(m, wsHome, filter); err != nil {
 			fatal(err)
 		}
 
 	case "pull":
 		args, localWorktrees := command.StripWorktreesFlags(args)
-		filter := filterArg(args, ctx)
+		filter := filterArg(args, defaultFilter, hasDefaultFilter)
 		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
 		if err := command.Pull(m, wsHome, filter, includeWorktrees); err != nil {
 			fatal(err)
@@ -183,8 +187,8 @@ dispatch:
 	case "--":
 		// Explicit escape: "ws -- [filter] <command...>"
 		filter, cmdArgs, localWorktrees := command.ParseSuperArgs(m, args)
-		if filter == "" {
-			filter = ctx
+		if filter == "" && hasDefaultFilter {
+			filter = defaultFilter
 		}
 		if len(cmdArgs) == 0 {
 			fmt.Fprintln(os.Stderr, "Usage: ws -- [-t|--worktrees|--no-worktrees] [filter] <command...>")
@@ -199,8 +203,8 @@ dispatch:
 		// Passthrough: treat as command to run across repos
 		allArgs := append([]string{cmd}, args...)
 		filter, cmdArgs, localWorktrees := command.ParseSuperArgs(m, allArgs)
-		if filter == "" {
-			filter = ctx
+		if filter == "" && hasDefaultFilter {
+			filter = defaultFilter
 		}
 		if len(cmdArgs) == 0 {
 			fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", cmd)
@@ -257,6 +261,45 @@ func parseCDArgs(args []string) (name, selector string, err error) {
 	return name, selector, nil
 }
 
+func resolveCDTarget(name, selector string, active map[string]manifest.RepoConfig) (string, string, error) {
+	if _, ok := active[name]; ok {
+		return name, selector, nil
+	}
+
+	repoName, inlineSelector, ok := splitCDInlineTarget(name, active)
+	if !ok {
+		return name, selector, nil
+	}
+	if selector != "" {
+		return "", "", fmt.Errorf("cd does not allow both repo@worktree and --worktree")
+	}
+	if inlineSelector == "" {
+		return "", "", fmt.Errorf("cd requires a worktree name after @")
+	}
+	return repoName, inlineSelector, nil
+}
+
+func splitCDInlineTarget(target string, active map[string]manifest.RepoConfig) (string, string, bool) {
+	if !strings.Contains(target, "@") {
+		return "", "", false
+	}
+
+	bestRepo := ""
+	for repoName := range active {
+		if !strings.HasPrefix(target, repoName+"@") {
+			continue
+		}
+		if len(repoName) > len(bestRepo) {
+			bestRepo = repoName
+		}
+	}
+	if bestRepo == "" {
+		return "", "", false
+	}
+
+	return bestRepo, strings.TrimPrefix(target, bestRepo+"@"), true
+}
+
 func shellInit() string {
 	return `ws() {
   case "$1" in
@@ -269,8 +312,59 @@ func shellInit() string {
       ;;
   esac
 }
+_ws_delegate_bash() {
+  local start actual_start cmd cur prev spec func cmdspec line
+  start="${1:-0}"
+  actual_start=$((start + 1))
+  if [ "$actual_start" -gt "${#COMP_WORDS[@]}" ]; then
+    return 0
+  fi
+  cmd="${COMP_WORDS[$actual_start]}"
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  prev=""
+  if [ "$COMP_CWORD" -gt "$actual_start" ]; then
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+  fi
+  spec="$(complete -p "$cmd" 2>/dev/null)" || {
+    COMPREPLY=( $(compgen -c -- "$cur" | sort -u) )
+    return 0
+  }
+
+  local -a old_comp_words
+  local old_comp_cword old_comp_line old_comp_point old_comp_type old_comp_key
+  old_comp_words=( "${COMP_WORDS[@]}" )
+  old_comp_cword=$COMP_CWORD
+  old_comp_line="${COMP_LINE:-}"
+  old_comp_point="${COMP_POINT:-0}"
+  old_comp_type="${COMP_TYPE:-}"
+  old_comp_key="${COMP_KEY:-}"
+
+  COMP_WORDS=( "${old_comp_words[@]:$actual_start}" )
+  COMP_CWORD=$((old_comp_cword - actual_start))
+  COMP_LINE="${COMP_WORDS[*]}"
+  COMP_POINT=${#COMP_LINE}
+
+  if [[ "$spec" =~ [[:space:]]-F[[:space:]]+([^[:space:]]+) ]]; then
+    func="${BASH_REMATCH[1]}"
+    COMPREPLY=()
+    "$func" "$cmd" "$cur" "$prev"
+  elif [[ "$spec" =~ [[:space:]]-C[[:space:]]+([^[:space:]]+) ]]; then
+    cmdspec="${BASH_REMATCH[1]}"
+    COMPREPLY=( $(command "$cmdspec" "$cmd" "$cur" "$prev") )
+  else
+    COMPREPLY=( $(compgen -c -- "$cur" | sort -u) )
+  fi
+
+  COMP_WORDS=( "${old_comp_words[@]}" )
+  COMP_CWORD=$old_comp_cword
+  COMP_LINE="$old_comp_line"
+  COMP_POINT=$old_comp_point
+  COMP_TYPE="$old_comp_type"
+  COMP_KEY="$old_comp_key"
+}
+
 _ws_complete_bash() {
-  local cur prev
+  local cur prev delegate_start
   local -a completions
   COMPREPLY=()
   completions=()
@@ -286,6 +380,11 @@ _ws_complete_bash() {
   while IFS= read -r line; do
     completions+=( "$line" )
   done < <(command ws __complete "$((COMP_CWORD-1))" "${COMP_WORDS[@]:1}")
+  if [ "${#completions[@]}" -eq 1 ] && [[ "${completions[0]}" == "` + commandFallbackSentinel + `":* ]]; then
+    delegate_start="${completions[0]#` + commandFallbackSentinel + `:}"
+    _ws_delegate_bash "$delegate_start"
+    return 0
+  fi
   if [ "${#completions[@]}" -eq 1 ] && [ "${completions[0]}" = "` + commandFallbackSentinel + `" ]; then
     COMPREPLY=( $(compgen -c -- "$cur" | sort -u) )
     return 0
@@ -293,8 +392,22 @@ _ws_complete_bash() {
   COMPREPLY=( "${completions[@]}" )
 }
 
+_ws_delegate_zsh() {
+  local start actual_start old_current
+  local -a old_words
+  start="${1:-0}"
+  actual_start=$((start + 2))
+  old_current=$CURRENT
+  old_words=("${words[@]}")
+  words=("${old_words[@]:$actual_start}")
+  CURRENT=$((old_current - actual_start + 1))
+  _normal
+  words=("${old_words[@]}")
+  CURRENT=$old_current
+}
+
 _ws_complete_zsh() {
-  local prev
+  local prev delegate_start
   local -a ws_words completions
   if (( CURRENT > 1 )); then
     prev="${words[CURRENT-1]}"
@@ -311,6 +424,11 @@ _ws_complete_zsh() {
     ws_words+=("${words[i]}")
   done
   completions=("${(@f)$(command ws __complete "$((CURRENT-2))" "${ws_words[@]}")}")
+  if (( ${#completions[@]} == 1 )) && [[ "${completions[1]}" == "` + commandFallbackSentinel + `":* ]]; then
+    delegate_start="${completions[1]#` + commandFallbackSentinel + `:}"
+    _ws_delegate_zsh "$delegate_start"
+    return
+  fi
   if (( ${#completions[@]} == 1 )) && [[ "${completions[1]}" == "` + commandFallbackSentinel + `" ]]; then
     _command_names
     return
@@ -345,6 +463,10 @@ func runCompletion(args []string) {
 	words := args[1:]
 	m := loadManifestForCompletion(words)
 	result := command.Complete(m, words, current)
+	if result.DelegateCommands {
+		fmt.Printf("%s:%d\n", commandFallbackSentinel, result.DelegateStart)
+		return
+	}
 	if result.FallbackCommands {
 		fmt.Println(commandFallbackSentinel)
 		return
@@ -355,29 +477,14 @@ func runCompletion(args []string) {
 }
 
 // filterArg returns the explicit filter if given, otherwise falls back to context.
-func filterArg(args []string, ctx string) string {
+func filterArg(args []string, defaultFilter string, hasDefaultFilter bool) string {
 	if len(args) > 0 {
 		return args[0]
 	}
-	if ctx != "" {
-		return ctx
+	if hasDefaultFilter {
+		return defaultFilter
 	}
 	return ""
-}
-
-func parseCodeArgs(args []string, ctx string) (string, command.WorktreesOverride, error) {
-	filterArgs, worktreesOverride := command.StripWorktreesFlags(args)
-
-	if len(filterArgs) > 1 {
-		return "", command.WorktreesOverride{}, fmt.Errorf("usage: ws code [-t|--worktrees|--no-worktrees] [filter]")
-	}
-	for _, arg := range filterArgs {
-		if strings.HasPrefix(arg, "-") {
-			return "", command.WorktreesOverride{}, fmt.Errorf("unknown code flag: %s", arg)
-		}
-	}
-
-	return filterArg(filterArgs, ctx), worktreesOverride, nil
 }
 
 func parseContextArgs(args []string) (action string, filter string, worktreesOverride command.WorktreesOverride, err error) {
@@ -451,11 +558,10 @@ Commands:
   init                   Emit shell integration and completion
   ll [filter] [-t|--worktrees|--no-worktrees]
                          Dashboard: branch, dirty, last commit
-  cd [repo] [--worktree <selector>]
+  cd [repo[@worktree]] [--worktree|-t <selector>]
                          Print repo path (no arg = workspace root)
   setup [filter]         Clone missing repos
-  code [-t|--worktrees|--no-worktrees] [filter]
-                         Generate VS Code workspace and open it
+  open                   Open the current VS Code workspace
   list [--all] [-t|--worktrees|--no-worktrees]
                          Show repos in manifest (--all includes excluded)
   fetch [filter]         Fetch all repos
@@ -478,7 +584,7 @@ Use -- to escape built-in names:
                          Run "fetch data.json" (not git fetch)
 
 Filters:
-  all                    All repos in any group (default)
+  all                    All active repos (default)
   <group>                Group name: ai, eng, db, inf
   <group>,<group>        Comma-separated groups
   <repo>                 Individual repo name

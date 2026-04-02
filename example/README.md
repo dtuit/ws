@@ -32,6 +32,6 @@ ws git log --oneline -3
 cd ..
 ws context none
 
-# Generate VS Code workspace
-ws code tui
+# Open the current VS Code workspace
+ws open
 ```

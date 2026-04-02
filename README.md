@@ -59,6 +59,7 @@ acme-workspace/
 ├── manifest.yml
 ├── manifest.local.yml      # optional, ignored
 ├── .ws-context             # generated, ignored
+├── .ws-context.resolved    # generated, ignored
 ├── .scope/                 # generated symlinks, ignored
 ├── ws.code-workspace       # generated, ignored
 └── repos/
@@ -75,6 +76,7 @@ A typical `.gitignore` for the workspace repo:
 ```gitignore
 .scope/
 .ws-context
+.ws-context.resolved
 *.code-workspace
 manifest.local.yml
 repos/
@@ -93,6 +95,7 @@ git init
 cat > .gitignore <<'EOF'
 .scope/
 .ws-context
+.ws-context.resolved
 *.code-workspace
 manifest.local.yml
 repos/
@@ -159,7 +162,8 @@ Then:
 ws setup
 ws ll
 ws backend git status
-ws code backend
+ws context backend
+ws open
 ```
 
 If you want shell integration for `ws cd` and tab completion, either add this to your shell config:
@@ -198,16 +202,15 @@ ws pull [filter] [-t|--worktrees|--no-worktrees]
                           Pull manifest checkouts or all discovered worktrees
 ws context [-t|--worktrees|--no-worktrees] [filter]
                           Persist the default filter
-ws code [-t|--worktrees|--no-worktrees] [filter]
-                          Generate the VS Code workspace file
+ws open                   Open the current VS Code workspace
 ws context add [-t|--worktrees|--no-worktrees] <filter>
                           Extend the current context
-ws cd [repo] [--worktree <selector>]
+ws cd [repo[@worktree]] [--worktree|-t <selector>]
                           Print repo path (or workspace root)
 ws init                   Emit shell integration and completion
 ```
 
-Supported commands share one worktree mode. Set `worktrees: true` in `manifest.local.yml` if you want `list`, `ll`, `pull`, `code`, `context`, and fan-out commands to include linked worktrees by default. Use `-t` to force that on for one command, or `--no-worktrees` to force it off.
+Supported commands share one worktree mode. Set `worktrees: true` in `manifest.local.yml` if you want `list`, `ll`, `pull`, `context`, and fan-out commands to include linked worktrees by default. Use `-t` to force that on for one command, or `--no-worktrees` to force it off.
 
 Any unrecognized command is executed across repos automatically:
 
@@ -223,27 +226,28 @@ ws -- fetch data.json
 
 ## Filters
 
-Filters apply to `ll`, `setup`, `fetch`, `pull`, `code`, `context`, and fan-out commands.
+Filters apply to `ll`, `setup`, `fetch`, `pull`, `context`, and fan-out commands.
 
-- `all`: every repo that belongs to at least one group
+- `all`: every active repo from the merged manifest
 - `backend`: a group name
 - `backend,ops`: multiple groups
 - `api-server`: an individual repo
 
-If you want a repo included in default operations, put it in at least one group. The default `all` filter only includes grouped repos.
+Use groups for named subsets. The default `all` filter includes every active repo from `manifest.yml` plus any overrides from `manifest.local.yml`.
 
 ## Worktrees
 
 `ws` discovers linked git worktrees at runtime from the manifest checkout. They are not stored as individual repos in `manifest.yml`.
 
-- Set `worktrees: true` in `manifest.local.yml` to make worktree-aware behavior the default across `list`, `ll`, `pull`, `code`, `context`, and fan-out commands.
+- Set `worktrees: true` in `manifest.local.yml` to make worktree-aware behavior the default across `list`, `ll`, `pull`, `context`, and fan-out commands.
 - Without that setting, commands default to the manifest checkout for each repo.
 - `ws list` shows a `WT` count for each repo; worktree mode expands it to one row per checkout.
-- `ws ll`, `ws pull`, `ws code`, `ws context`, and `ws <command...>` follow the same worktree mode instead of each command behaving differently.
+- `ws ll`, `ws pull`, `ws context`, and `ws <command...>` follow the same worktree mode instead of each command behaving differently.
 - Use `-t` or `--worktrees` to enable worktree mode for one command, or `--no-worktrees` to disable it for one command.
-- `ws cd api-server --worktree feature/auth` resolves a linked worktree by unique branch, path basename, or exact path.
+- `ws cd api-server -t feature/auth` resolves a linked worktree by unique branch, path basename, or exact path.
+- `ws cd api-server@api-server-feature` is shorthand for selecting a worktree by its checkout name.
 - `ws fetch` remains repo-scoped and runs once per manifest repo.
-- In worktree mode, `ws code` includes sibling worktrees in the generated workspace so both checkouts appear in the VS Code Explorer.
+- In worktree mode, `ws context` includes sibling worktrees in the generated workspace so both checkouts appear in the VS Code Explorer.
 
 ## Context And Agents
 
@@ -253,9 +257,12 @@ If you want a repo included in default operations, put it in at least one group.
 2. regenerates the VS Code workspace file for that filter
 3. rebuilds `.scope/` with symlinks to only the repos in scope
 
+For `ws context all` and `ws context none`, the generated scope only includes repos that are already cloned on disk.
+
 That makes the workspace repo useful as an agent entry point:
 
 - run `ws context backend` before starting focused work
+- run `ws open` when you want to open the current generated workspace in VS Code
 - run `ws context add repo-x` when you want to widen that scope without replacing it
 - use the workspace repo as the control plane and `.scope/` as the narrowed filesystem view for agents
 - keep the shared manifest committed while local context stays in ignored files
