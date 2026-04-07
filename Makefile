@@ -6,6 +6,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 OUTPUT ?= bin/$(BINARY)
+INSTALL_DIR ?= $(HOME)/.local/bin
 LDFLAGS := -X github.com/dtuit/ws/internal/version.version=$(VERSION) -X github.com/dtuit/ws/internal/version.commit=$(COMMIT) -X github.com/dtuit/ws/internal/version.date=$(DATE)
 
 all: fmt test build
@@ -20,10 +21,9 @@ fmt:
 	$(GO) fmt ./...
 
 install: build
-	@cp $(OUTPUT) $(GOPATH)/bin/$(BINARY) 2>/dev/null || \
-	 cp $(OUTPUT) $(HOME)/go/bin/$(BINARY) 2>/dev/null || \
-	 sudo cp $(OUTPUT) /usr/local/bin/$(BINARY)
-	@echo "Installed $(BINARY)"
+	install -d "$(INSTALL_DIR)"
+	install -m 0755 "$(OUTPUT)" "$(INSTALL_DIR)/$(BINARY)"
+	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
 
 clean:
 	rm -rf bin/

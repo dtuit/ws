@@ -63,7 +63,7 @@ func validateContextGroupName(m *manifest.Manifest, group string) error {
 }
 
 func currentContextGroupMembers(m *manifest.Manifest, wsHome string) ([]string, error) {
-	state, ok, err := readContextState(filepath.Join(wsHome, contextFile))
+	state, ok, err := loadStoredContextState(wsHome)
 	if err != nil {
 		return nil, err
 	}
