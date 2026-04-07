@@ -16,6 +16,9 @@ type CompletionResult struct {
 	DelegateStart    int
 }
 
+// CompletionHandler returns shell completion candidates for one built-in command.
+type CompletionHandler func(m *manifest.Manifest, args []string, current int) CompletionResult
+
 // CompletionOutput renders completion lines, including shell delegation markers.
 func CompletionOutput(m *manifest.Manifest, words []string, current int) []string {
 	result := Complete(m, words, current)
@@ -55,43 +58,16 @@ func Complete(m *manifest.Manifest, words []string, current int) CompletionResul
 	args := words[commandIndex+1:]
 	argIndex := current - commandIndex - 1
 
-	switch cmd {
-	case CommandHelp, CommandVersion:
-		return CompletionResult{}
-	case CommandCD:
-		if argIndex == 0 {
-			return finalizeCompletion(repoSuggestions(m), currentWord, false)
-		}
-		if argIndex == 1 {
-			return finalizeCompletion([]string{"--worktree", "-t"}, currentWord, false)
-		}
-		return CompletionResult{}
-	case CommandList:
-		values := append([]string{"--all", "-a"}, worktreesFlagSuggestions()...)
-		return finalizeCompletion(values, currentWord, false)
-	case CommandSetup:
-		if argIndex == 0 {
-			return finalizeCompletion(filterSuggestions(m), currentWord, false)
-		}
-		return CompletionResult{}
-	case CommandShell:
-		return completeShell(args, argIndex)
-	case CommandOpen:
-		return CompletionResult{}
-	case CommandLL, CommandPull:
-		return completeFilterCommand(m, args, argIndex, worktreesFlagSuggestions())
-	case CommandFetch:
-		if argIndex == 0 {
-			return finalizeCompletion(filterSuggestions(m), currentWord, false)
-		}
-		return CompletionResult{}
-	case CommandContext:
-		return completeContext(m, args, argIndex)
-	case "--":
+	if cmd == "--" {
 		return completePassthrough(m, args, argIndex)
-	default:
-		return completeDefaultPassthrough(m, append([]string{cmd}, args...), current-commandIndex)
 	}
+	if builtin, ok := builtinCommandByName(cmd); ok {
+		if builtin.complete == nil {
+			return CompletionResult{}
+		}
+		return builtin.complete(m, args, argIndex)
+	}
+	return completeDefaultPassthrough(m, append([]string{cmd}, args...), current-commandIndex)
 }
 
 func completeDefaultPassthrough(m *manifest.Manifest, words []string, current int) CompletionResult {
@@ -116,13 +92,51 @@ func completeDefaultPassthrough(m *manifest.Manifest, words []string, current in
 	return CompletionResult{}
 }
 
+func completeNoopCommand(_ *manifest.Manifest, _ []string, _ int) CompletionResult {
+	return CompletionResult{}
+}
+
+func completeCDCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	currentWord := completionWord(args, current)
+	switch current {
+	case 0:
+		return finalizeCompletion(repoSuggestions(m), currentWord, false)
+	case 1:
+		return finalizeCompletion([]string{"--worktree", "-t"}, currentWord, false)
+	default:
+		return CompletionResult{}
+	}
+}
+
+func completeListCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
+	return finalizeCompletion(append([]string{"--all", "-a"}, worktreesFlagSuggestions()...), completionWord(args, current), false)
+}
+
+func completeSetupCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current == 0 {
+		return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
+	}
+	return CompletionResult{}
+}
+
+func completeFetchCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current == 0 {
+		return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
+	}
+	return CompletionResult{}
+}
+
+func completeLLOrPullCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	return completeFilterCommand(m, args, current, worktreesFlagSuggestions())
+}
+
 func completeFilterCommand(m *manifest.Manifest, args []string, current int, flags []string) CompletionResult {
 	if current < 0 {
 		return CompletionResult{}
 	}
 	if current == 0 {
 		values := append(flags, filterSuggestions(m)...)
-		return finalizeCompletion(values, args[0], false)
+		return finalizeCompletion(values, completionWord(args, current), false)
 	}
 
 	seenFlag := false
@@ -130,7 +144,7 @@ func completeFilterCommand(m *manifest.Manifest, args []string, current int, fla
 	for i, arg := range args {
 		if hasFlag(flags, arg) {
 			if i == current {
-				return finalizeCompletion(flags, args[current], false)
+				return finalizeCompletion(flags, completionWord(args, current), false)
 			}
 			seenFlag = true
 			continue
@@ -140,7 +154,7 @@ func completeFilterCommand(m *manifest.Manifest, args []string, current int, fla
 		}
 		if i == current {
 			if filterIndex == 0 {
-				return finalizeCompletion(filterSuggestions(m), args[current], false)
+				return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
 			}
 			return CompletionResult{}
 		}
@@ -154,23 +168,23 @@ func completeFilterCommand(m *manifest.Manifest, args []string, current int, fla
 	return CompletionResult{}
 }
 
-func completeShell(args []string, current int) CompletionResult {
+func completeShellCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
 	if current < 0 {
 		return CompletionResult{}
 	}
 	if current == 0 {
-		return finalizeCompletion([]string{"init", "install"}, args[0], false)
+		return finalizeCompletion([]string{"init", "install"}, completionWord(args, current), false)
 	}
 	return CompletionResult{}
 }
 
-func completeContext(m *manifest.Manifest, args []string, current int) CompletionResult {
+func completeContextCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
 	if current < 0 {
 		return CompletionResult{}
 	}
 
 	flags := worktreesFlagSuggestions()
-	currentWord := args[current]
+	currentWord := completionWord(args, current)
 
 	var nonFlags []string
 	seenLocal := false
@@ -275,6 +289,13 @@ func finalizeCompletion(values []string, currentWord string, allowCommandFallbac
 		return CompletionResult{FallbackCommands: true}
 	}
 	return CompletionResult{Values: filtered}
+}
+
+func completionWord(args []string, current int) string {
+	if current < 0 || current >= len(args) {
+		return ""
+	}
+	return args[current]
 }
 
 func matchPrefix(values []string, currentWord string) []string {
