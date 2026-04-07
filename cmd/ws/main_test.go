@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dtuit/ws/internal/command"
 	"github.com/dtuit/ws/internal/manifest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -67,7 +68,7 @@ printf '%s\n' "${COMPREPLY[@]}"
 }
 
 func TestUsageTextIncludesSharedCommandHelp(t *testing.T) {
-	text := usageText()
+	text := command.UsageText()
 
 	assert.Contains(t, text, "context set [-t|--worktrees|--no-worktrees] <filter>")
 	assert.Contains(t, text, "Persist the current context as a named group")

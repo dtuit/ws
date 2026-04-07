@@ -1,6 +1,7 @@
 package command
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -13,6 +14,18 @@ type CompletionResult struct {
 	FallbackCommands bool
 	DelegateCommands bool
 	DelegateStart    int
+}
+
+// CompletionOutput renders completion lines, including shell delegation markers.
+func CompletionOutput(m *manifest.Manifest, words []string, current int) []string {
+	result := Complete(m, words, current)
+	if result.DelegateCommands {
+		return []string{fmt.Sprintf("%s:%d", CompletionCommandFallbackSentinel, result.DelegateStart)}
+	}
+	if result.FallbackCommands {
+		return []string{CompletionCommandFallbackSentinel}
+	}
+	return result.Values
 }
 
 // Complete returns shell completion candidates for ws arguments.

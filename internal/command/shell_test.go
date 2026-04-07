@@ -13,3 +13,11 @@ func TestShellBlockUsesShellInitCommand(t *testing.T) {
 	assert.Contains(t, block, `eval "$(ws shell init)"`)
 	assert.NotContains(t, block, `eval "$(ws init)"`)
 }
+
+func TestShellInitScriptUsesCompletionSentinel(t *testing.T) {
+	script := ShellInitScript()
+
+	assert.Contains(t, script, CompletionCommandFallbackSentinel)
+	assert.Contains(t, script, "_ws_complete_bash")
+	assert.Contains(t, script, "_ws_complete_zsh")
+}
