@@ -2,7 +2,14 @@
 
 `ws` turns a repo containing `manifest.yml` into the control plane for a multi-repo workspace.
 
-The intended model is simple:
+At a glance:
+
+- `manifest.yml` declares which repos exist, where they clone, and how they are grouped
+- `ws setup` clones missing repos into the configured `root`
+- `ws context` regenerates a VS Code workspace and a scoped `.scope/` tree
+- `ws <command...>` fans shell commands out across the selected repos
+
+The recommended model is simple:
 
 - create a dedicated repo for your workspace manifest
 - use that repo as the root workspace
@@ -49,6 +56,14 @@ make install
 GitHub Actions builds per-platform artifacts for pushes, pull requests, and tags.
 Tag builds stamp the binaries with the tag version, publish a GitHub Release,
 and keep downloaded artifacts aligned with `ws version`.
+
+## Requirements
+
+- `git` is required for cloning and repo operations
+- the VS Code `code` command is required for `ws open`
+- `bash` or `zsh` is required for `ws shell init` and tab completion
+- Go is only required when installing or building from source
+- release artifacts are published for Linux and macOS on `amd64` and `arm64`
 
 ## Workspace Repo Model
 
@@ -181,6 +196,20 @@ ws shell install
 
 With that loaded, `ws` completes built-in commands, filters, repo names, and falls back to your shell's command completion for fan-out commands like `ws backend git ...`.
 
+## Common Tasks
+
+| Task | Command |
+|---|---|
+| Clone any missing repos | `ws setup` |
+| See repo status across the current scope | `ws ll` |
+| Narrow the workspace to a group | `ws context backend` |
+| Add one more repo to the current scope | `ws context add web-app` |
+| Run a command across a group | `ws backend git status` |
+| Open the generated VS Code workspace | `ws open` |
+| Print the path to a repo or worktree | `ws cd api-server` |
+
+`ws open` only works after a workspace file exists, so run `ws context <filter>` first if you have not generated one yet.
+
 ## Daily Workflow
 
 Operate from the workspace repo. `ws` finds the workspace by:
@@ -195,7 +224,7 @@ Core commands:
 ws ll [filter] [-t|--worktrees|--no-worktrees]
                           Dashboard: branch, dirty state, last commit
 ws list [--all] [-t|--worktrees|--no-worktrees]
-                          Show repos in the manifest
+                          Show repos in the manifest (--all includes excluded)
 ws setup [filter]         Clone missing repos
 ws shell init             Emit shell integration and completion
 ws shell install          Write shell config for ws cd and completion
@@ -203,8 +232,8 @@ ws fetch [filter]         Fetch all repos in scope
 ws pull [filter] [-t|--worktrees|--no-worktrees]
                           Pull manifest checkouts or all discovered worktrees
 ws context [-t|--worktrees|--no-worktrees] [filter]
-                          Persist the default filter
-ws open                   Open the current VS Code workspace
+                          Set or show the default filter (none clears)
+ws open                   Open the generated VS Code workspace
 ws context add [-t|--worktrees|--no-worktrees] <filter>
                           Extend the current context
 ws context remove [-t|--worktrees|--no-worktrees] <filter>
@@ -237,6 +266,9 @@ Filters apply to `ll`, `setup`, `fetch`, `pull`, `context`, and fan-out commands
 - `backend`: a group name
 - `backend,ops`: multiple groups
 - `api-server`: an individual repo
+- `api-server@api-server-feature`: an explicit worktree target
+
+For `ws context`, `none` or `reset` clears the saved context.
 
 Use groups for named subsets. The default `all` filter includes every active repo from `manifest.yml` plus any overrides from `manifest.local.yml`.
 
