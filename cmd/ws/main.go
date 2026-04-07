@@ -45,10 +45,6 @@ dispatch:
 		args = args[1:]
 	}
 
-	if cmd == command.CommandInit {
-		fmt.Print(shellInit())
-		return
-	}
 	if cmd == "__complete" {
 		runCompletion(args)
 		return
@@ -57,9 +53,22 @@ dispatch:
 		usage()
 		return
 	}
+	if cmd == "init" {
+		fatal(fmt.Errorf("ws init has moved to `ws shell init`"))
+	}
 	if cmd == command.CommandVersion || cmd == "--version" {
 		fmt.Println(version.String())
 		return
+	}
+	if cmd == command.CommandShell {
+		parsed, err := parseShellArgs(args)
+		if err != nil {
+			fatal(err)
+		}
+		if parsed.Action == "init" {
+			fmt.Print(shellInit())
+			return
+		}
 	}
 
 	wsHome, err := findWorkspaceHome(wsHomeOverride)
@@ -137,17 +146,24 @@ dispatch:
 		}
 
 	case command.CommandSetup:
-		installShell := false
-		var filterArgs []string
-		for _, a := range args {
-			if a == "--install-shell" {
-				installShell = true
-			} else {
-				filterArgs = append(filterArgs, a)
+		for _, arg := range args {
+			if arg == "--install-shell" {
+				fatal(fmt.Errorf("ws setup --install-shell has moved to `ws shell install`"))
 			}
 		}
-		filter := filterArg(filterArgs, rawCtx, rawCtx != "")
-		if err := command.Setup(m, wsHome, filter, installShell); err != nil {
+		if err := command.Setup(m, wsHome, filterArg(args, rawCtx, rawCtx != "")); err != nil {
+			fatal(err)
+		}
+
+	case command.CommandShell:
+		parsed, err := parseShellArgs(args)
+		if err != nil {
+			fatal(err)
+		}
+		if parsed.Action != "install" {
+			fatal(fmt.Errorf("usage: ws shell <init|install>"))
+		}
+		if err := command.InstallShellConfig(wsHome); err != nil {
 			fatal(err)
 		}
 
@@ -502,6 +518,23 @@ type contextArgs struct {
 	Group             string
 	Local             bool
 	WorktreesOverride command.WorktreesOverride
+}
+
+type shellArgs struct {
+	Action string
+}
+
+func parseShellArgs(args []string) (shellArgs, error) {
+	if len(args) != 1 {
+		return shellArgs{}, fmt.Errorf("usage: ws shell <init|install>")
+	}
+
+	switch args[0] {
+	case "init", "install":
+		return shellArgs{Action: args[0]}, nil
+	default:
+		return shellArgs{}, fmt.Errorf("usage: ws shell <init|install>")
+	}
 }
 
 func parseContextArgs(args []string) (contextArgs, error) {

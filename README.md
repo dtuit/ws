@@ -170,13 +170,13 @@ If you want shell integration for `ws cd` and tab completion, either add this to
 
 ```bash
 export WS_HOME=/path/to/acme-workspace
-eval "$(ws init)"
+eval "$(ws shell init)"
 ```
 
 or let `ws` write it for you:
 
 ```bash
-ws setup --install-shell
+ws shell install
 ```
 
 With that loaded, `ws` completes built-in commands, filters, repo names, and falls back to your shell's command completion for fan-out commands like `ws backend git ...`.
@@ -197,6 +197,8 @@ ws ll [filter] [-t|--worktrees|--no-worktrees]
 ws list [--all] [-t|--worktrees|--no-worktrees]
                           Show repos in the manifest
 ws setup [filter]         Clone missing repos
+ws shell init             Emit shell integration and completion
+ws shell install          Write shell config for ws cd and completion
 ws fetch [filter]         Fetch all repos in scope
 ws pull [filter] [-t|--worktrees|--no-worktrees]
                           Pull manifest checkouts or all discovered worktrees
@@ -211,7 +213,6 @@ ws context save [--local] <group>
                           Save the current context as a named group
 ws cd [repo[@worktree]] [--worktree|-t <selector>]
                           Print repo path (or workspace root)
-ws init                   Emit shell integration and completion
 ```
 
 Supported commands share one worktree mode. Set `worktrees: true` in `manifest.local.yml` if you want `list`, `ll`, `pull`, `context`, and fan-out commands to include linked worktrees by default. Use `-t` to force that on for one command, or `--no-worktrees` to force it off.
@@ -226,7 +227,7 @@ ws ops make plan
 ws -- fetch data.json
 ```
 
-`ws cd` changes your shell directory only when the `ws init` shell function is installed. The same shell hook also enables completion for `bash` and `zsh`. Without it, `ws cd` just prints the path.
+`ws cd` changes your shell directory only when the `ws shell init` shell function is installed. The same shell hook also enables completion for `bash` and `zsh`. Without it, `ws cd` just prints the path.
 
 ## Filters
 

@@ -46,7 +46,7 @@ repos:
 set -euo pipefail
 export WS_HOME="`+wsHome+`"
 export PATH="`+tmpDir+`:$PATH"
-source <(ws init)
+source <(ws shell init)
 _git_complete() {
   COMPREPLY=( $(compgen -W "branch blame bisect" -- "$2") )
 }
@@ -71,8 +71,34 @@ func TestUsageTextIncludesSharedCommandHelp(t *testing.T) {
 
 	assert.Contains(t, text, "context set [-t|--worktrees|--no-worktrees] <filter>")
 	assert.Contains(t, text, "Persist the current context as a named group")
+	assert.Contains(t, text, "shell init")
+	assert.Contains(t, text, "shell install")
 	assert.NotContains(t, text, "\n  help ")
+	assert.NotContains(t, text, "\n  init ")
 	assert.NotContains(t, text, "\n  version ")
+}
+
+func TestParseShellArgsInit(t *testing.T) {
+	parsed, err := parseShellArgs([]string{"init"})
+	require.NoError(t, err)
+	assert.Equal(t, "init", parsed.Action)
+}
+
+func TestParseShellArgsInstall(t *testing.T) {
+	parsed, err := parseShellArgs([]string{"install"})
+	require.NoError(t, err)
+	assert.Equal(t, "install", parsed.Action)
+}
+
+func TestParseShellArgsRejectsInvalidInput(t *testing.T) {
+	_, err := parseShellArgs(nil)
+	require.Error(t, err)
+
+	_, err = parseShellArgs([]string{"bogus"})
+	require.Error(t, err)
+
+	_, err = parseShellArgs([]string{"install", "extra"})
+	require.Error(t, err)
 }
 
 func TestParseContextArgs_Show(t *testing.T) {

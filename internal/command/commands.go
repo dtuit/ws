@@ -1,12 +1,12 @@
 package command
 
 const (
-	CommandInit    = "init"
 	CommandHelp    = "help"
 	CommandVersion = "version"
 	CommandLL      = "ll"
 	CommandCD      = "cd"
 	CommandSetup   = "setup"
+	CommandShell   = "shell"
 	CommandOpen    = "open"
 	CommandList    = "list"
 	CommandFetch   = "fetch"
@@ -28,13 +28,6 @@ type BuiltinCommand struct {
 }
 
 var builtinCommands = []BuiltinCommand{
-	{
-		Name:        CommandInit,
-		ShowInUsage: true,
-		Help: []HelpEntry{
-			{Usage: CommandInit, Description: "Emit shell integration and completion"},
-		},
-	},
 	{
 		Name: CommandHelp,
 	},
@@ -60,6 +53,14 @@ var builtinCommands = []BuiltinCommand{
 		ShowInUsage: true,
 		Help: []HelpEntry{
 			{Usage: "setup [filter]", Description: "Clone missing repos"},
+		},
+	},
+	{
+		Name:        CommandShell,
+		ShowInUsage: true,
+		Help: []HelpEntry{
+			{Usage: "shell init", Description: "Emit shell integration and completion"},
+			{Usage: "shell install", Description: "Write shell config for ws cd and completion"},
 		},
 	},
 	{

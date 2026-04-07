@@ -308,12 +308,14 @@ repos:
 	result := Complete(m, []string{""}, 0)
 	assert.Contains(t, result.Values, "ll")
 	assert.Contains(t, result.Values, "open")
+	assert.Contains(t, result.Values, "shell")
 	assert.Contains(t, result.Values, "backend")
 	assert.Contains(t, result.Values, "repo-a")
 	assert.Contains(t, result.Values, "--workspace")
 	assert.Contains(t, result.Values, "-t")
 	assert.Contains(t, result.Values, "--no-worktrees")
 	assert.Contains(t, result.Values, "--worktrees")
+	assert.NotContains(t, result.Values, "init")
 	assert.False(t, result.FallbackCommands)
 }
 
@@ -337,7 +339,7 @@ repos:
 	assert.Equal(t, []string{"repo-a", "repo-b"}, result.Values)
 }
 
-func TestCompleteSetupIncludesFlagsAndFilters(t *testing.T) {
+func TestCompleteSetupIncludesFilters(t *testing.T) {
 	m, err := parseManifestYAML(`
 remotes:
   default: git@example.com
@@ -349,9 +351,14 @@ repos:
 	require.NoError(t, err)
 
 	result := Complete(m, []string{"setup", ""}, 1)
-	assert.Contains(t, result.Values, "--install-shell")
 	assert.Contains(t, result.Values, "ai")
 	assert.Contains(t, result.Values, "all")
+}
+
+func TestCompleteShellIncludesSubcommands(t *testing.T) {
+	result := Complete(nil, []string{"shell", ""}, 1)
+	assert.Contains(t, result.Values, "init")
+	assert.Contains(t, result.Values, "install")
 }
 
 func TestCompleteLLIncludesWorktreesFlagAndFilters(t *testing.T) {

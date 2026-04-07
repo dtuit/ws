@@ -43,7 +43,7 @@ func Complete(m *manifest.Manifest, words []string, current int) CompletionResul
 	argIndex := current - commandIndex - 1
 
 	switch cmd {
-	case CommandHelp, CommandVersion, CommandInit:
+	case CommandHelp, CommandVersion:
 		return CompletionResult{}
 	case CommandCD:
 		if argIndex == 0 {
@@ -57,8 +57,12 @@ func Complete(m *manifest.Manifest, words []string, current int) CompletionResul
 		values := append([]string{"--all", "-a"}, worktreesFlagSuggestions()...)
 		return finalizeCompletion(values, currentWord, false)
 	case CommandSetup:
-		values := append([]string{"--install-shell"}, filterSuggestions(m)...)
-		return finalizeCompletion(values, currentWord, false)
+		if argIndex == 0 {
+			return finalizeCompletion(filterSuggestions(m), currentWord, false)
+		}
+		return CompletionResult{}
+	case CommandShell:
+		return completeShell(args, argIndex)
 	case CommandOpen:
 		return CompletionResult{}
 	case CommandLL, CommandPull:
@@ -134,6 +138,16 @@ func completeFilterCommand(m *manifest.Manifest, args []string, current int, fla
 		return finalizeCompletion(filterSuggestions(m), "", false)
 	}
 
+	return CompletionResult{}
+}
+
+func completeShell(args []string, current int) CompletionResult {
+	if current < 0 {
+		return CompletionResult{}
+	}
+	if current == 0 {
+		return finalizeCompletion([]string{"init", "install"}, args[0], false)
+	}
 	return CompletionResult{}
 }
 

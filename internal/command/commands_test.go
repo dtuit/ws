@@ -8,12 +8,12 @@ import (
 
 func TestBuiltinCommandNames(t *testing.T) {
 	assert.Equal(t, []string{
-		CommandInit,
 		CommandHelp,
 		CommandVersion,
 		CommandLL,
 		CommandCD,
 		CommandSetup,
+		CommandShell,
 		CommandOpen,
 		CommandList,
 		CommandFetch,
@@ -28,6 +28,10 @@ func TestBuiltinUsageEntries(t *testing.T) {
 	assert.Contains(t, entries, HelpEntry{
 		Usage:       "context set [-t|--worktrees|--no-worktrees] <filter>",
 		Description: "Explicit form of context set",
+	})
+	assert.Contains(t, entries, HelpEntry{
+		Usage:       "shell install",
+		Description: "Write shell config for ws cd and completion",
 	})
 	assert.NotContains(t, entries, HelpEntry{
 		Usage:       CommandHelp,
