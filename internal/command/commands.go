@@ -14,6 +14,15 @@ const (
 	CommandContext = "context"
 )
 
+type builtinCommandAlias struct {
+	Alias string
+	Name  string
+}
+
+var builtinCommandAliases = []builtinCommandAlias{
+	{Alias: "ctx", Name: CommandContext},
+}
+
 // HelpEntry is a single usage line plus its description.
 type HelpEntry struct {
 	Usage       string
@@ -107,6 +116,7 @@ var builtinCommands = []BuiltinCommand{
 		ShowInUsage: true,
 		Help: []HelpEntry{
 			{Usage: "context [filter]", Description: "Set default filter (no arg = show, " + ContextClearUsage + " = clear)"},
+			{Usage: "ctx [filter]", Description: "Alias for context"},
 			{Usage: "context set <filter>", Description: "Explicit form of context set"},
 			{Usage: "context add <filter>", Description: "Add groups or repos to the existing context"},
 			{Usage: "context remove <filter>", Description: "Remove groups or repos from the existing context"},
@@ -139,6 +149,15 @@ func BuiltinCommandNames() []string {
 	return names
 }
 
+// BuiltinCommandSuggestions returns canonical command names plus shorthand aliases.
+func BuiltinCommandSuggestions() []string {
+	names := BuiltinCommandNames()
+	for _, alias := range builtinCommandAliases {
+		names = append(names, alias.Alias)
+	}
+	return names
+}
+
 // BuiltinUsageEntries returns the help entries shown in `ws help`.
 func BuiltinUsageEntries() []HelpEntry {
 	var entries []HelpEntry
@@ -151,7 +170,18 @@ func BuiltinUsageEntries() []HelpEntry {
 	return entries
 }
 
+// ResolveBuiltinCommandName maps a shorthand alias to its canonical built-in name.
+func ResolveBuiltinCommandName(name string) string {
+	for _, alias := range builtinCommandAliases {
+		if alias.Alias == name {
+			return alias.Name
+		}
+	}
+	return name
+}
+
 func builtinCommandByName(name string) (BuiltinCommand, bool) {
+	name = ResolveBuiltinCommandName(name)
 	for _, cmd := range builtinCommands {
 		if cmd.Name == name {
 			return cmd, true

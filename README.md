@@ -232,6 +232,7 @@ ws fetch [filter]         Fetch all repos in scope
 ws pull [filter]          Pull repos in scope
 ws context [filter]
                           Set or show the default filter (none/reset clears)
+ws ctx [filter]           Alias for ws context
 ws open                   Open the generated VS Code workspace
 ws context add <filter>
                           Extend the current context
@@ -273,6 +274,7 @@ Filters apply to `ll`, `setup`, `fetch`, `pull`, `context`, and fan-out commands
 - `api-server@api-server-feature`: an explicit worktree target
 
 For `ws context`, `none` or `reset` clears the saved context.
+`ws ctx <filter>` is shorthand for `ws context <filter>`.
 
 Use groups for named subsets. The default `all` filter includes every active repo from `manifest.yml` plus any overrides from `manifest.local.yml`.
 

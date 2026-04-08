@@ -43,6 +43,7 @@ dispatch:
 		runCompletion(args)
 		return
 	}
+	cmd = command.ResolveBuiltinCommandName(cmd)
 	if cmd == command.CommandHelp || cmd == "--help" || cmd == "-h" {
 		usage()
 		return

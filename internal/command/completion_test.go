@@ -23,6 +23,7 @@ repos:
 	assert.Contains(t, result.Values, "ll")
 	assert.Contains(t, result.Values, "open")
 	assert.Contains(t, result.Values, "shell")
+	assert.Contains(t, result.Values, "ctx")
 	assert.Contains(t, result.Values, "backend")
 	assert.Contains(t, result.Values, "repo-a")
 	assert.Contains(t, result.Values, "--workspace")
@@ -187,6 +188,23 @@ repos:
 	assert.Contains(t, result.Values, "add")
 	assert.Contains(t, result.Values, "remove")
 	assert.Contains(t, result.Values, "none")
+	assert.Contains(t, result.Values, "reset")
+}
+
+func TestCompleteContextAliasIncludesContextSuggestions(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  default: git@example.com
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"ctx", ""}, 1)
+	assert.Contains(t, result.Values, "-t")
+	assert.Contains(t, result.Values, "add")
 	assert.Contains(t, result.Values, "reset")
 }
 

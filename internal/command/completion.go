@@ -49,12 +49,12 @@ func Complete(m *manifest.Manifest, words []string, current int) CompletionResul
 	}
 
 	if commandIndex >= len(words) || current == commandIndex {
-		values := append(globalFlagSuggestions(), BuiltinCommandNames()...)
+		values := append(globalFlagSuggestions(), BuiltinCommandSuggestions()...)
 		values = append(values, filterSuggestions(m)...)
 		return finalizeCompletion(values, currentWord, true)
 	}
 
-	cmd := words[commandIndex]
+	cmd := ResolveBuiltinCommandName(words[commandIndex])
 	args := words[commandIndex+1:]
 	argIndex := current - commandIndex - 1
 

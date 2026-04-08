@@ -22,12 +22,21 @@ func TestBuiltinCommandNames(t *testing.T) {
 	}, BuiltinCommandNames())
 }
 
+func TestBuiltinCommandSuggestions(t *testing.T) {
+	assert.Contains(t, BuiltinCommandSuggestions(), CommandContext)
+	assert.Contains(t, BuiltinCommandSuggestions(), "ctx")
+}
+
 func TestBuiltinUsageEntries(t *testing.T) {
 	entries := BuiltinUsageEntries()
 
 	assert.Contains(t, entries, HelpEntry{
 		Usage:       "context set <filter>",
 		Description: "Explicit form of context set",
+	})
+	assert.Contains(t, entries, HelpEntry{
+		Usage:       "ctx [filter]",
+		Description: "Alias for context",
 	})
 	assert.Contains(t, entries, HelpEntry{
 		Usage:       "ll [filter]",
@@ -49,4 +58,9 @@ func TestBuiltinUsageEntries(t *testing.T) {
 		Usage:       CommandVersion,
 		Description: "",
 	})
+}
+
+func TestResolveBuiltinCommandName(t *testing.T) {
+	assert.Equal(t, CommandContext, ResolveBuiltinCommandName("ctx"))
+	assert.Equal(t, CommandLL, ResolveBuiltinCommandName(CommandLL))
 }

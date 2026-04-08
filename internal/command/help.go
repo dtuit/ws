@@ -19,6 +19,9 @@ Worktree options:
   -t, --worktrees     Expand repo/group filters to linked worktrees
   --no-worktrees      Force primary checkouts only
 
+Context shorthand:
+  ctx                 Alias for "context"
+
 Any unrecognized command is run across repos:
   ws git status          Run "git status" in all repos
   ws -t git status
