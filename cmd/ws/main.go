@@ -77,7 +77,6 @@ dispatch:
 
 	// Context: use the resolved scoped repos as the default filter when present.
 	rawCtx := command.GetContext(wsHome)
-	defaultFilter, hasDefaultFilter := command.GetDefaultContext(wsHome)
 	defaultWorktrees := m.Worktrees
 
 	switch cmd {
@@ -145,7 +144,11 @@ dispatch:
 				fatal(fmt.Errorf("ws setup --install-shell has moved to `ws shell install`"))
 			}
 		}
-		if err := command.Setup(m, wsHome, filterArg(args, rawCtx, rawCtx != "")); err != nil {
+		filter, err := parseOptionalFilterArg(args, rawCtx, rawCtx != "", "ws setup [filter]")
+		if err != nil {
+			fatal(err)
+		}
+		if err := command.Setup(m, wsHome, filter); err != nil {
 			fatal(err)
 		}
 
@@ -183,22 +186,34 @@ dispatch:
 
 	case command.CommandLL:
 		args, localWorktrees := command.StripWorktreesFlags(args)
-		filter := filterArg(args, defaultFilter, hasDefaultFilter)
 		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
+		defaultFilter, hasDefaultFilter := command.GetDefaultContextForMode(m, wsHome, includeWorktrees)
+		filter, err := parseOptionalFilterArg(args, defaultFilter, hasDefaultFilter, "ws ll [filter] ["+command.WorktreesFlagUsage+"]")
+		if err != nil {
+			fatal(err)
+		}
 		if err := command.LL(m, wsHome, filter, includeWorktrees); err != nil {
 			fatal(err)
 		}
 
 	case command.CommandFetch:
-		filter := filterArg(args, defaultFilter, hasDefaultFilter)
+		defaultFilter, hasDefaultFilter := command.GetDefaultContextForMode(m, wsHome, false)
+		filter, err := parseOptionalFilterArg(args, defaultFilter, hasDefaultFilter, "ws fetch [filter]")
+		if err != nil {
+			fatal(err)
+		}
 		if err := command.Fetch(m, wsHome, filter); err != nil {
 			fatal(err)
 		}
 
 	case command.CommandPull:
 		args, localWorktrees := command.StripWorktreesFlags(args)
-		filter := filterArg(args, defaultFilter, hasDefaultFilter)
 		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
+		defaultFilter, hasDefaultFilter := command.GetDefaultContextForMode(m, wsHome, includeWorktrees)
+		filter, err := parseOptionalFilterArg(args, defaultFilter, hasDefaultFilter, "ws pull [filter] ["+command.WorktreesFlagUsage+"]")
+		if err != nil {
+			fatal(err)
+		}
 		if err := command.Pull(m, wsHome, filter, includeWorktrees); err != nil {
 			fatal(err)
 		}
@@ -206,14 +221,15 @@ dispatch:
 	case "--":
 		// Explicit escape: "ws -- [filter] <command...>"
 		filter, cmdArgs, localWorktrees := command.ParseSuperArgs(m, args)
+		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
+		defaultFilter, hasDefaultFilter := command.GetDefaultContextForMode(m, wsHome, includeWorktrees)
 		if filter == "" && hasDefaultFilter {
 			filter = defaultFilter
 		}
 		if len(cmdArgs) == 0 {
-			fmt.Fprintln(os.Stderr, "Usage: ws -- [-t|--worktrees|--no-worktrees] [filter] <command...>")
+			fmt.Fprintf(os.Stderr, "Usage: ws -- [%s] [filter] <command...>\n", command.WorktreesFlagUsage)
 			os.Exit(1)
 		}
-		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
 		if err := command.Super(m, wsHome, filter, cmdArgs, includeWorktrees); err != nil {
 			fatal(err)
 		}
@@ -222,6 +238,8 @@ dispatch:
 		// Passthrough: treat as command to run across repos
 		allArgs := append([]string{cmd}, args...)
 		filter, cmdArgs, localWorktrees := command.ParseSuperArgs(m, allArgs)
+		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
+		defaultFilter, hasDefaultFilter := command.GetDefaultContextForMode(m, wsHome, includeWorktrees)
 		if filter == "" && hasDefaultFilter {
 			filter = defaultFilter
 		}
@@ -230,7 +248,6 @@ dispatch:
 			usage()
 			os.Exit(1)
 		}
-		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
 		if err := command.Super(m, wsHome, filter, cmdArgs, includeWorktrees); err != nil {
 			fatal(err)
 		}

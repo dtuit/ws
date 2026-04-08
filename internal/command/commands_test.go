@@ -26,8 +26,16 @@ func TestBuiltinUsageEntries(t *testing.T) {
 	entries := BuiltinUsageEntries()
 
 	assert.Contains(t, entries, HelpEntry{
-		Usage:       "context set [-t|--worktrees|--no-worktrees] <filter>",
+		Usage:       "context set <filter>",
 		Description: "Explicit form of context set",
+	})
+	assert.Contains(t, entries, HelpEntry{
+		Usage:       "ll [filter]",
+		Description: "Dashboard: branch, dirty, last commit",
+	})
+	assert.Contains(t, entries, HelpEntry{
+		Usage:       "cd [repo[@worktree]] [--worktree|-t <selector>]",
+		Description: "Print repo path (no arg = workspace root)",
 	})
 	assert.Contains(t, entries, HelpEntry{
 		Usage:       "shell install",

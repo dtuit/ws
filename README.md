@@ -221,22 +221,21 @@ Operate from the workspace repo. `ws` finds the workspace by:
 Core commands:
 
 ```text
-ws ll [filter] [-t|--worktrees|--no-worktrees]
+ws ll [filter]
                           Dashboard: branch, dirty state, last commit
-ws list [--all] [-t|--worktrees|--no-worktrees]
+ws list [--all]
                           Show repos in the manifest (--all includes excluded)
 ws setup [filter]         Clone missing repos
 ws shell init             Emit shell integration and completion
 ws shell install          Write shell config for ws cd and completion
 ws fetch [filter]         Fetch all repos in scope
-ws pull [filter] [-t|--worktrees|--no-worktrees]
-                          Pull manifest checkouts or all discovered worktrees
-ws context [-t|--worktrees|--no-worktrees] [filter]
-                          Set or show the default filter (none clears)
+ws pull [filter]          Pull repos in scope
+ws context [filter]
+                          Set or show the default filter (none/reset clears)
 ws open                   Open the generated VS Code workspace
-ws context add [-t|--worktrees|--no-worktrees] <filter>
+ws context add <filter>
                           Extend the current context
-ws context remove [-t|--worktrees|--no-worktrees] <filter>
+ws context remove <filter>
                           Remove repos from the current context
 ws context save [--local] <group>
                           Save the current context as a named group
@@ -244,7 +243,12 @@ ws cd [repo[@worktree]] [--worktree|-t <selector>]
                           Print repo path (or workspace root)
 ```
 
-Supported commands share one worktree mode. Set `worktrees: true` in `manifest.local.yml` if you want `list`, `ll`, `pull`, `context`, and fan-out commands to include linked worktrees by default. Use `-t` to force that on for one command, or `--no-worktrees` to force it off.
+Worktree options:
+
+- `-t`, `--worktrees`: expand repo/group filters to linked worktrees
+- `--no-worktrees`: force primary checkouts only
+
+Supported commands share one worktree mode. Set `worktrees: true` in `manifest.local.yml` if you want `list`, `ll`, `pull`, `context`, and fan-out commands to include linked worktrees by default.
 
 Any unrecognized command is executed across repos automatically:
 
@@ -294,7 +298,7 @@ Use groups for named subsets. The default `all` filter includes every active rep
 2. regenerates the VS Code workspace file for that filter
 3. rebuilds `.scope/` with symlinks to only the repos in scope
 
-For `ws context all` and `ws context none`, the generated scope only includes repos that are already cloned on disk.
+For `ws context all`, `ws context none`, and `ws context reset`, the generated scope only includes repos that are already cloned on disk.
 
 That makes the workspace repo useful as an agent entry point:
 

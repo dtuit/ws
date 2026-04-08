@@ -18,7 +18,7 @@ func (o WorktreesOverride) Resolve(defaultValue bool) bool {
 // ParseWorktreesFlag parses a single worktree-related CLI flag.
 func ParseWorktreesFlag(token string) (WorktreesOverride, bool) {
 	switch token {
-	case "-t", "-W", "--worktrees":
+	case "-t", "--worktrees":
 		return WorktreesOverride{Set: true, Value: true}, true
 	case "--no-worktrees":
 		return WorktreesOverride{Set: true, Value: false}, true
@@ -51,5 +51,5 @@ func isWorktreesFlag(token string) bool {
 }
 
 func worktreesFlagSuggestions() []string {
-	return []string{"-t", "-W", "--worktrees", "--no-worktrees"}
+	return []string{"-t", "--worktrees", "--no-worktrees"}
 }

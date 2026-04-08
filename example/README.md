@@ -29,7 +29,7 @@ cd .scope
 # Run a command across repos
 ws git log --oneline -3
 
-# Clear context
+# Clear context (`ws context reset` also works)
 cd ..
 ws context none
 

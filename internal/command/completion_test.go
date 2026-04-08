@@ -53,6 +53,20 @@ repos:
 	assert.Equal(t, []string{"repo-a", "repo-b"}, result.Values)
 }
 
+func TestCompleteCDIncludesWorktreeSelectorFlags(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"cd", "repo-a", ""}, 2)
+	assert.Contains(t, result.Values, "--worktree")
+	assert.Contains(t, result.Values, "-t")
+}
+
 func TestCompleteSetupIncludesFilters(t *testing.T) {
 	m, err := parseManifestYAML(`
 remotes:
@@ -88,7 +102,6 @@ repos:
 
 	result := Complete(m, []string{"ll", ""}, 1)
 	assert.Contains(t, result.Values, "-t")
-	assert.Contains(t, result.Values, "-W")
 	assert.Contains(t, result.Values, "--no-worktrees")
 	assert.Contains(t, result.Values, "--worktrees")
 	assert.Contains(t, result.Values, "ai")

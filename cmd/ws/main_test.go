@@ -70,7 +70,11 @@ printf '%s\n' "${COMPREPLY[@]}"
 func TestUsageTextIncludesSharedCommandHelp(t *testing.T) {
 	text := command.UsageText()
 
-	assert.Contains(t, text, "context set [-t|--worktrees|--no-worktrees] <filter>")
+	assert.Contains(t, text, "context set <filter>")
+	assert.Contains(t, text, "ll [filter]")
+	assert.Contains(t, text, "cd [repo[@worktree]] [--worktree|-t <selector>]")
+	assert.Contains(t, text, "\"none\" or \"reset\" = clear")
+	assert.Contains(t, text, "Worktree options:")
 	assert.Contains(t, text, "Persist the current context as a named group")
 	assert.Contains(t, text, "shell init")
 	assert.Contains(t, text, "shell install")
@@ -189,6 +193,24 @@ func TestParseContextArgs_SaveLocal(t *testing.T) {
 func TestParseContextArgs_SaveRejectsWorktreesFlag(t *testing.T) {
 	_, err := parseContextArgs([]string{"save", "-t", "focus"})
 	require.Error(t, err)
+}
+
+func TestParseOptionalFilterArgRejectsExtraPositionals(t *testing.T) {
+	_, err := parseOptionalFilterArg([]string{"backend", "repo-a"}, "", false, "ws ll [filter]")
+	require.EqualError(t, err, "usage: ws ll [filter]")
+}
+
+func TestParseOptionalFilterArgFallsBackToDefault(t *testing.T) {
+	filter, err := parseOptionalFilterArg(nil, "backend", true, "ws ll [filter]")
+	require.NoError(t, err)
+	assert.Equal(t, "backend", filter)
+}
+
+func TestParseCDArgsWorktreeFlag(t *testing.T) {
+	name, selector, err := parseCDArgs([]string{"repo-a", "-t", "feature/auth"})
+	require.NoError(t, err)
+	assert.Equal(t, "repo-a", name)
+	assert.Equal(t, "feature/auth", selector)
 }
 
 func TestParseContextArgs_RejectsLocalWithoutSave(t *testing.T) {

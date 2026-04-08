@@ -41,7 +41,7 @@ var builtinCommands = []BuiltinCommand{
 		Name:        CommandLL,
 		ShowInUsage: true,
 		Help: []HelpEntry{
-			{Usage: "ll [filter] [-t|--worktrees|--no-worktrees]", Description: "Dashboard: branch, dirty, last commit"},
+			{Usage: "ll [filter]", Description: "Dashboard: branch, dirty, last commit"},
 		},
 		complete: completeLLOrPullCommand,
 	},
@@ -49,7 +49,7 @@ var builtinCommands = []BuiltinCommand{
 		Name:        CommandCD,
 		ShowInUsage: true,
 		Help: []HelpEntry{
-			{Usage: "cd [repo[@worktree]] [--worktree|-t <selector>]", Description: "Print repo path (no arg = workspace root)"},
+			{Usage: "cd [repo[@worktree]] [" + CDWorktreeFlagUsage + " <selector>]", Description: "Print repo path (no arg = workspace root)"},
 		},
 		complete: completeCDCommand,
 	},
@@ -82,7 +82,7 @@ var builtinCommands = []BuiltinCommand{
 		Name:        CommandList,
 		ShowInUsage: true,
 		Help: []HelpEntry{
-			{Usage: "list [--all] [-t|--worktrees|--no-worktrees]", Description: "Show repos in manifest (--all includes excluded)"},
+			{Usage: "list [--all]", Description: "Show repos in manifest (--all includes excluded)"},
 		},
 		complete: completeListCommand,
 	},
@@ -98,7 +98,7 @@ var builtinCommands = []BuiltinCommand{
 		Name:        CommandPull,
 		ShowInUsage: true,
 		Help: []HelpEntry{
-			{Usage: "pull [filter] [-t|--worktrees|--no-worktrees]", Description: "Pull manifest checkouts or all discovered worktrees"},
+			{Usage: "pull [filter]", Description: "Pull repos in scope"},
 		},
 		complete: completeLLOrPullCommand,
 	},
@@ -106,10 +106,10 @@ var builtinCommands = []BuiltinCommand{
 		Name:        CommandContext,
 		ShowInUsage: true,
 		Help: []HelpEntry{
-			{Usage: "context [-t|--worktrees|--no-worktrees] [filter]", Description: `Set default filter (no arg = show, "none" = clear)`},
-			{Usage: "context set [-t|--worktrees|--no-worktrees] <filter>", Description: "Explicit form of context set"},
-			{Usage: "context add [-t|--worktrees|--no-worktrees] <filter>", Description: "Add groups or repos to the existing context"},
-			{Usage: "context remove [-t|--worktrees|--no-worktrees] <filter>", Description: "Remove groups or repos from the existing context"},
+			{Usage: "context [filter]", Description: "Set default filter (no arg = show, " + ContextClearUsage + " = clear)"},
+			{Usage: "context set <filter>", Description: "Explicit form of context set"},
+			{Usage: "context add <filter>", Description: "Add groups or repos to the existing context"},
+			{Usage: "context remove <filter>", Description: "Remove groups or repos from the existing context"},
 			{Usage: "context save [--local] <group>", Description: "Persist the current context as a named group"},
 		},
 		complete: completeContextCommand,

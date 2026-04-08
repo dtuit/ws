@@ -410,3 +410,33 @@ repos:
 	assert.Equal(t, "repo-feature", repos[0].Worktree)
 	assert.Equal(t, worktreeDir, repos[0].Path)
 }
+
+func TestGetDefaultContextForMode_CollapsesResolvedWorktreesWhenDisabled(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+repos:
+  repo:
+  other:
+`)
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(wsHome, contextFile), []byte(`
+raw: repo,repo@repo-feature,other
+resolved:
+  - repo
+  - repo@repo-feature
+  - other
+`), 0644))
+
+	filter, ok := GetDefaultContextForMode(m, wsHome, true)
+	require.True(t, ok)
+	assert.Equal(t, "repo,repo@repo-feature,other", filter)
+
+	filter, ok = GetDefaultContextForMode(m, wsHome, false)
+	require.True(t, ok)
+	assert.Equal(t, "repo,other", filter)
+}

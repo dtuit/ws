@@ -15,6 +15,10 @@ func UsageText() string {
 		writeUsageEntry(&b, entry)
 	}
 	b.WriteString(`
+Worktree options:
+  -t, --worktrees     Expand repo/group filters to linked worktrees
+  --no-worktrees      Force primary checkouts only
+
 Any unrecognized command is run across repos:
   ws git status          Run "git status" in all repos
   ws -t git status
@@ -23,7 +27,7 @@ Any unrecognized command is run across repos:
   ws ls -la              Any command, not just git
 
 Use -- to escape built-in names:
-  ws -- [-t|--worktrees|--no-worktrees] fetch data.json
+  ws -- fetch data.json
                          Run "fetch data.json" (not git fetch)
 
 Filters:

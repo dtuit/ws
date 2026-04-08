@@ -75,7 +75,7 @@ func completionWorkspaceOverride(words []string) string {
 				return ""
 			}
 			return strings.TrimSpace(words[i+1])
-		case "-t", "-W", "--worktrees", "--no-worktrees":
+		case "-t", "--worktrees", "--no-worktrees":
 			continue
 		default:
 			if !strings.HasPrefix(words[i], "-") {

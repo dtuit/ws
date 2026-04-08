@@ -58,7 +58,7 @@ func AddContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bo
 		return err
 	}
 	if addition == "" {
-		return fmt.Errorf("usage: ws context add [-t|--worktrees|--no-worktrees] <filter>")
+		return fmt.Errorf("usage: ws context add [%s] <filter>", WorktreesFlagUsage)
 	}
 
 	currentRaw := storedContextRaw(wsHome)
@@ -79,10 +79,10 @@ func RemoveContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees
 		return err
 	}
 	if removal == "" {
-		return fmt.Errorf("usage: ws context remove [-t|--worktrees|--no-worktrees] <filter>")
+		return fmt.Errorf("usage: ws context remove [%s] <filter>", WorktreesFlagUsage)
 	}
 
-	currentFilter, ok := GetDefaultContext(wsHome)
+	currentFilter, ok := GetDefaultContextForMode(m, wsHome, includeWorktrees)
 	if !ok {
 		return fmt.Errorf("no context set")
 	}
@@ -122,14 +122,53 @@ func GetContext(wsHome string) string {
 // GetDefaultContext returns the resolved default filter when context has been set.
 // The returned bool reports whether a generated default exists.
 func GetDefaultContext(wsHome string) (string, bool) {
+	return getDefaultContextState(nil, wsHome, true)
+}
+
+// GetDefaultContextForMode returns the resolved default filter for the requested
+// worktree mode. When worktrees are disabled, saved explicit worktree targets
+// collapse back to their primary repo names.
+func GetDefaultContextForMode(m *manifest.Manifest, wsHome string, includeWorktrees bool) (string, bool) {
+	return getDefaultContextState(m, wsHome, includeWorktrees)
+}
+
+func getDefaultContextState(m *manifest.Manifest, wsHome string, includeWorktrees bool) (string, bool) {
 	state, ok, err := loadStoredContextState(wsHome)
 	if err != nil || !ok {
 		return "", false
 	}
-	if len(state.Resolved) == 0 {
+	resolved := state.Resolved
+	if !includeWorktrees {
+		resolved = collapseResolvedContextNames(m, resolved)
+	}
+	if len(resolved) == 0 {
 		return manifest.EmptyFilter, true
 	}
-	return strings.Join(state.Resolved, ","), true
+	return strings.Join(resolved, ","), true
+}
+
+func collapseResolvedContextNames(m *manifest.Manifest, names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	if m == nil {
+		return append([]string(nil), names...)
+	}
+
+	active := m.ActiveRepos()
+	seen := make(map[string]bool, len(names))
+	collapsed := make([]string, 0, len(names))
+	for _, name := range names {
+		if repoName, selector, ok := splitWorktreeToken(name, active); ok && selector != "" {
+			name = repoName
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		collapsed = append(collapsed, name)
+	}
+	return collapsed
 }
 
 // ShowContext displays the current context.

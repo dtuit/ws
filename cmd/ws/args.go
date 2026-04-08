@@ -29,6 +29,20 @@ func stripBoolFlag(args []string, names ...string) ([]string, bool) {
 	return rest, found
 }
 
+func parseOptionalFilterArg(args []string, defaultFilter string, hasDefaultFilter bool, usage string) (string, error) {
+	switch len(args) {
+	case 0:
+		if hasDefaultFilter {
+			return defaultFilter, nil
+		}
+		return "", nil
+	case 1:
+		return args[0], nil
+	default:
+		return "", fmt.Errorf("usage: %s", usage)
+	}
+}
+
 func parseCDArgs(args []string) (name, selector string, err error) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -61,7 +75,7 @@ func resolveCDTarget(name, selector string, active map[string]manifest.RepoConfi
 		return name, selector, nil
 	}
 	if selector != "" {
-		return "", "", fmt.Errorf("cd does not allow both repo@worktree and --worktree")
+		return "", "", fmt.Errorf("cd does not allow both repo@worktree and %s <selector>", command.CDWorktreeFlagUsage)
 	}
 	if inlineSelector == "" {
 		return "", "", fmt.Errorf("cd requires a worktree name after @")
@@ -88,17 +102,6 @@ func splitCDInlineTarget(target string, active map[string]manifest.RepoConfig) (
 	}
 
 	return bestRepo, strings.TrimPrefix(target, bestRepo+"@"), true
-}
-
-// filterArg returns the explicit filter if given, otherwise falls back to context.
-func filterArg(args []string, defaultFilter string, hasDefaultFilter bool) string {
-	if len(args) > 0 {
-		return args[0]
-	}
-	if hasDefaultFilter {
-		return defaultFilter
-	}
-	return ""
 }
 
 type contextArgs struct {
@@ -164,7 +167,7 @@ func parseContextArgs(args []string) (contextArgs, error) {
 
 	if action == "save" {
 		if parsed.WorktreesOverride.Set {
-			return contextArgs{}, fmt.Errorf("ws context save does not accept -t|--worktrees|--no-worktrees")
+			return contextArgs{}, fmt.Errorf("ws context save does not accept %s", command.WorktreesFlagUsage)
 		}
 		if len(tokens) != 1 {
 			return contextArgs{}, fmt.Errorf("usage: ws context save [--local] <group>")
@@ -177,7 +180,7 @@ func parseContextArgs(args []string) (contextArgs, error) {
 		return contextArgs{}, fmt.Errorf("--local is only valid with ws context save")
 	}
 	if len(tokens) == 0 {
-		return contextArgs{}, fmt.Errorf("usage: ws context %s [-t|--worktrees|--no-worktrees] <filter>", action)
+		return contextArgs{}, fmt.Errorf("usage: ws context %s [%s] <filter>", action, command.WorktreesFlagUsage)
 	}
 
 	parsed.Filter = strings.Join(tokens, ",")

@@ -274,7 +274,7 @@ func firstCommandIndex(words []string) int {
 				return len(words)
 			}
 			i++
-		case "-t", "-W", "--worktrees", "--no-worktrees":
+		case "-t", "--worktrees", "--no-worktrees":
 			continue
 		default:
 			return i
@@ -318,7 +318,7 @@ func matchPrefix(values []string, currentWord string) []string {
 }
 
 func globalFlagSuggestions() []string {
-	return []string{"-w", "--workspace", "-t", "-W", "--worktrees", "--no-worktrees", "-h", "--help", "--version"}
+	return []string{"-w", "--workspace", "-t", "--worktrees", "--no-worktrees", "-h", "--help", "--version"}
 }
 
 func filterSuggestions(m *manifest.Manifest) []string {
