@@ -13,10 +13,11 @@ import (
 
 // RunOpts configures a parallel command run across repos.
 type RunOpts struct {
-	Verb      string // progress label: "fetching", "pulling", etc.
-	Summary   string // summary label: "Fetched", "Pulled", etc.
-	Suppress  string // suppress this exact output (e.g. "Already up to date.")
-	GitPrompt bool   // if false, suppress git credential prompts (default: suppress)
+	Verb          string // progress label: "fetching", "pulling", etc.
+	Summary       string // summary label: "Fetched", "Pulled", etc.
+	Suppress      string // suppress this exact output (e.g. "Already up to date.")
+	GitPrompt     bool   // if false, suppress git credential prompts (default: suppress)
+	ColorPrefixes bool   // if true, color per-repo prefixes like docker compose logs
 }
 
 // RunResult is the outcome of running a command in one repo.
@@ -43,6 +44,11 @@ func RunAll(repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int, opts Ru
 		}
 	}
 
+	prefixes := make([]string, len(repos))
+	for i, r := range repos {
+		prefixes[i] = formatRunPrefix(r.Name, maxName, i, opts.ColorPrefixes)
+	}
+
 	var env []string
 	if !opts.GitPrompt {
 		env = append(os.Environ(),
@@ -54,14 +60,12 @@ func RunAll(repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int, opts Ru
 	fi, _ := os.Stdout.Stat()
 	isTTY := fi != nil && fi.Mode()&os.ModeCharDevice != 0
 
-	for _, repo := range repos {
+	for i, repo := range repos {
 		wg.Add(1)
-		go func(r manifest.RepoInfo) {
+		go func(r manifest.RepoInfo, prefix string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-
-			prefix := fmt.Sprintf("%-*s | ", maxName, r.Name)
 
 			if !IsCheckout(r.Path) {
 				mu.Lock()
@@ -106,7 +110,7 @@ func RunAll(repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int, opts Ru
 			if isTTY {
 				fmt.Fprintf(os.Stderr, "\r\033[K%s... %d/%d", opts.Verb, done, total)
 			}
-		}(repo)
+		}(repo, prefixes[i])
 	}
 
 	wg.Wait()
@@ -117,4 +121,20 @@ func RunAll(repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int, opts Ru
 		fmt.Printf("%s %d repo(s).\n", opts.Summary, total-failCount)
 	}
 	return failCount
+}
+
+var runPrefixPalette = []string{
+	term.Blue,
+	term.Yellow,
+	term.Green,
+	term.Magenta,
+	term.Cyan,
+}
+
+func formatRunPrefix(name string, width, colorIndex int, colorize bool) string {
+	namePart := fmt.Sprintf("%-*s", width, name)
+	if !colorize || len(runPrefixPalette) == 0 {
+		return namePart + " | "
+	}
+	return term.Colorize(runPrefixPalette[colorIndex%len(runPrefixPalette)], namePart) + term.Colorize(term.Dim, " | ")
 }

@@ -13,14 +13,15 @@ func init() {
 }
 
 const (
-	Reset  = "\033[0m"
-	Red    = "\033[31m"
-	Green  = "\033[32m"
-	Yellow = "\033[33m"
+	Reset   = "\033[0m"
+	Red     = "\033[31m"
+	Blue    = "\033[34m"
+	Green   = "\033[32m"
+	Yellow  = "\033[33m"
 	Magenta = "\033[35m"
 	Cyan    = "\033[36m"
-	Bold   = "\033[1m"
-	Dim    = "\033[2m"
+	Bold    = "\033[1m"
+	Dim     = "\033[2m"
 )
 
 // Colorize wraps s in the given ANSI code if color output is enabled.

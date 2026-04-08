@@ -214,8 +214,9 @@ func StatusAll(repos []manifest.RepoInfo, maxWorkers int) []RepoStatus {
 func Exec(repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int) int {
 	isGit := len(cmdArgs) > 0 && cmdArgs[0] == "git"
 	return RunAll(repos, cmdArgs, maxWorkers, RunOpts{
-		Verb:      "running",
-		GitPrompt: !isGit, // only suppress prompts for git commands
+		Verb:          "running",
+		GitPrompt:     !isGit, // only suppress prompts for git commands
+		ColorPrefixes: true,
 	})
 }
 
