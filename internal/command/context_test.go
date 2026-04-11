@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dtuit/ws/internal/manifest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -116,6 +117,57 @@ repos:
 	state := readStoredContext(t, wsHome)
 	assert.Equal(t, "backend,repo-c,frontend", state.Raw)
 	assert.Equal(t, []string{"repo-a", "repo-c", "repo-b"}, state.Resolved)
+}
+
+func TestSetContext_PrintsResolvedRepos(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+groups:
+  backend: [repo-a]
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-b"))
+
+	output := captureCommandStdout(t, func() {
+		require.NoError(t, SetContext(m, wsHome, "backend,repo-b", false))
+	})
+
+	assert.Contains(t, output, `Context set to "backend,repo-b" (2 repos)`)
+	assert.Contains(t, output, "Resolved: repo-a, repo-b")
+}
+
+func TestShowContext_PrintsResolvedRepos(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+
+	require.NoError(t, writeContextState(filepath.Join(wsHome, contextFile), "repo-a,repo-b", []manifest.RepoInfo{
+		{Name: "repo-a"},
+		{Name: "repo-b"},
+	}))
+
+	output := captureCommandStdout(t, func() {
+		ShowContext(m, wsHome)
+	})
+
+	assert.Contains(t, output, "Context: repo-a,repo-b (2 repos)")
+	assert.Contains(t, output, "Resolved: repo-a, repo-b")
 }
 
 func TestSetContext_ActiveIncludesDirtyAndRecentRepos(t *testing.T) {

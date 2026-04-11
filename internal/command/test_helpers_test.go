@@ -2,6 +2,7 @@ package command
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -130,4 +131,25 @@ func repoNames(repos []manifest.RepoInfo) []string {
 		names[i] = repo.Name
 	}
 	return names
+}
+
+func captureCommandStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	original := os.Stdout
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = writer
+
+	defer func() {
+		os.Stdout = original
+	}()
+
+	fn()
+
+	require.NoError(t, writer.Close())
+	data, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	return string(data)
 }

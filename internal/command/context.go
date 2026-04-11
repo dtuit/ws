@@ -43,6 +43,7 @@ func SetContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bo
 		return err
 	}
 	fmt.Printf("Context set to %q (%d repos)\n", filter, len(repos))
+	fmt.Printf("Resolved: %s\n", formatResolvedContextRepos(repos))
 
 	if err := syncReposDir(wsHome, repos); err != nil {
 		return err
@@ -194,6 +195,21 @@ func ShowContext(m *manifest.Manifest, wsHome string) {
 		return
 	}
 	fmt.Printf("Context: %s (%d repos)\n", normalized, len(state.Resolved))
+	if len(state.Resolved) > 0 {
+		fmt.Printf("Resolved: %s\n", strings.Join(state.Resolved, ", "))
+	}
+}
+
+func formatResolvedContextRepos(repos []manifest.RepoInfo) string {
+	if len(repos) == 0 {
+		return "(none)"
+	}
+
+	names := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		names = append(names, repo.Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // syncReposDir creates/updates a repos/ directory with symlinks to the scoped repos.
