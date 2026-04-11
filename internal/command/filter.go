@@ -4,13 +4,34 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dtuit/ws/internal/git"
 	"github.com/dtuit/ws/internal/manifest"
 )
 
-const autoFilterToken = "auto"
+const (
+	activeFilterToken         = "active"
+	dirtyFilterToken          = "dirty"
+	mineFilterToken           = "mine"
+	defaultRecentFilterWindow = 14 * 24 * time.Hour
+)
+
+type activityFilterMode int
+
+const (
+	activityFilterActive activityFilterMode = iota
+	activityFilterDirty
+	activityFilterMine
+)
+
+type activityFilterSpec struct {
+	token        string
+	mode         activityFilterMode
+	recentWindow time.Duration
+}
 
 func resolveCommandRepos(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) ([]manifest.RepoInfo, error) {
 	repos, err := resolveFilterRepos(m, wsHome, filter, false)
@@ -64,15 +85,23 @@ func resolveFilterRepos(m *manifest.Manifest, wsHome, filter string, strict bool
 			continue
 		}
 
-		if token == autoFilterToken {
-			autoRepos, err := resolveAutoRepos(m, wsHome)
+		if spec, ok, err := parseActivityFilterToken(token); ok {
+			if err != nil {
+				if strict {
+					return nil, err
+				}
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				continue
+			}
+
+			activityRepos, err := resolveActivityRepos(m, wsHome, spec)
 			if err != nil {
 				if strict {
 					return nil, err
 				}
 				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 			}
-			for _, repo := range autoRepos {
+			for _, repo := range activityRepos {
 				add(repo)
 			}
 			continue
@@ -128,20 +157,106 @@ func resolveFilterRepos(m *manifest.Manifest, wsHome, filter string, strict bool
 	return result, nil
 }
 
-func resolveAutoRepos(m *manifest.Manifest, wsHome string) ([]manifest.RepoInfo, error) {
+func parseActivityFilterToken(token string) (activityFilterSpec, bool, error) {
+	switch token {
+	case activeFilterToken:
+		return activityFilterSpec{
+			token:        token,
+			mode:         activityFilterActive,
+			recentWindow: defaultRecentFilterWindow,
+		}, true, nil
+	case dirtyFilterToken:
+		return activityFilterSpec{
+			token: token,
+			mode:  activityFilterDirty,
+		}, true, nil
+	case mineFilterToken:
+		return activityFilterSpec{}, true, fmt.Errorf("%q requires a duration, e.g. %s:1d", mineFilterToken, mineFilterToken)
+	}
+
+	prefix, raw, ok := strings.Cut(token, ":")
+	if !ok {
+		return activityFilterSpec{}, false, nil
+	}
+
+	switch prefix {
+	case activeFilterToken, mineFilterToken, dirtyFilterToken:
+	default:
+		return activityFilterSpec{}, false, nil
+	}
+
+	if raw == "" {
+		return activityFilterSpec{}, true, fmt.Errorf("%q requires a duration", token)
+	}
+	if prefix == dirtyFilterToken {
+		return activityFilterSpec{}, true, fmt.Errorf("%q does not accept a duration", dirtyFilterToken)
+	}
+
+	recentWindow, err := parseRecentFilterWindow(raw)
+	if err != nil {
+		return activityFilterSpec{}, true, fmt.Errorf("%q uses an invalid duration: %w", token, err)
+	}
+
+	spec := activityFilterSpec{
+		token:        token,
+		recentWindow: recentWindow,
+	}
+	if prefix == activeFilterToken {
+		spec.mode = activityFilterActive
+	} else {
+		spec.mode = activityFilterMine
+	}
+	return spec, true, nil
+}
+
+func parseRecentFilterWindow(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return 0, fmt.Errorf("duration is required")
+	}
+
+	if len(raw) < 2 {
+		return 0, fmt.Errorf("unsupported duration %q", raw)
+	}
+
+	value, err := strconv.ParseInt(raw[:len(raw)-1], 10, 64)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("unsupported duration %q", raw)
+	}
+
+	var unit time.Duration
+	switch raw[len(raw)-1] {
+	case 's':
+		unit = time.Second
+	case 'm':
+		unit = time.Minute
+	case 'h':
+		unit = time.Hour
+	case 'd':
+		unit = 24 * time.Hour
+	case 'w':
+		unit = 7 * 24 * time.Hour
+	default:
+		return 0, fmt.Errorf("unsupported duration %q", raw)
+	}
+
+	return time.Duration(value) * unit, nil
+}
+
+func resolveActivityRepos(m *manifest.Manifest, wsHome string, spec activityFilterSpec) ([]manifest.RepoInfo, error) {
 	candidates := m.AllRepos(wsHome)
 	if len(candidates) == 0 {
 		return nil, nil
 	}
 
-	activity := git.AutoActivityAll(candidates, git.Workers(len(candidates)))
+	activity := git.InspectRepoActivityAll(candidates, spec.recentWindow, git.Workers(len(candidates)))
 	matched := make([]manifest.RepoInfo, 0, len(candidates))
 	var failures []string
 
 	for i, state := range activity {
 		switch {
 		case state.Err == nil:
-			if state.MatchesAuto() {
+			if matchesActivityFilter(spec, state) {
 				matched = append(matched, candidates[i])
 			}
 		case errors.Is(state.Err, git.ErrNotCloned):
@@ -152,10 +267,21 @@ func resolveAutoRepos(m *manifest.Manifest, wsHome string) ([]manifest.RepoInfo,
 	}
 
 	if len(failures) > 0 {
-		return matched, fmt.Errorf("auto filter failed for %s", strings.Join(failures, "; "))
+		return matched, fmt.Errorf("%s filter failed for %s", spec.token, strings.Join(failures, "; "))
 	}
 
 	return matched, nil
+}
+
+func matchesActivityFilter(spec activityFilterSpec, state git.RepoActivity) bool {
+	switch spec.mode {
+	case activityFilterDirty:
+		return state.Dirty
+	case activityFilterMine:
+		return state.RecentLocalCommit
+	default:
+		return state.Dirty || state.RecentLocalCommit
+	}
 }
 
 func baseRepoInfo(m *manifest.Manifest, wsHome, name string, cfg manifest.RepoConfig, groups []string) manifest.RepoInfo {

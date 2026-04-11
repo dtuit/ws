@@ -176,7 +176,7 @@ repos:
 	assert.Contains(t, err.Error(), "no context set")
 }
 
-func TestValidateContextGroupName_RejectsAuto(t *testing.T) {
+func TestValidateContextGroupName_RejectsReservedActivityFilters(t *testing.T) {
 	m, err := parseManifestYAML(`
 remotes:
   default: git@example.com
@@ -185,9 +185,11 @@ repos:
 `)
 	require.NoError(t, err)
 
-	err = validateContextGroupName(m, autoFilterToken)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reserved filter name")
+	for _, group := range []string{activeFilterToken, dirtyFilterToken, mineFilterToken, "mine:1d", "active:1d"} {
+		err = validateContextGroupName(m, group)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reserved filter name")
+	}
 }
 
 func TestCompleteContextSuggestsSave(t *testing.T) {

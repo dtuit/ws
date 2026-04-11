@@ -271,9 +271,14 @@ func normalizeContextFilter(m *manifest.Manifest, filter string) (string, error)
 		case "all":
 			hasAll = true
 			continue
-		case autoFilterToken:
-			// Reserved dynamic filter token.
 		default:
+			if _, ok, err := parseActivityFilterToken(token); ok {
+				if err != nil {
+					invalid = append(invalid, token)
+					continue
+				}
+				break
+			}
 			if _, ok := m.Groups[token]; !ok {
 				if _, ok := active[token]; !ok {
 					repoName, selector, worktreeTarget := splitWorktreeToken(token, active)

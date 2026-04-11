@@ -159,7 +159,7 @@ func TestStatus_MixedDirtyState(t *testing.T) {
 	assert.Contains(t, s.Symbols(), "?")
 }
 
-func TestAutoActivity_DirtyRepoMatches(t *testing.T) {
+func TestInspectRepoActivity_DirtyRepoMatches(t *testing.T) {
 	dir := t.TempDir()
 	repoDir := initTestRepo(t, dir, "dirty-repo")
 	cmd := exec.Command("git", "config", "user.email", "other@example.com")
@@ -170,14 +170,13 @@ func TestAutoActivity_DirtyRepoMatches(t *testing.T) {
 	require.NoError(t, cmd.Run())
 	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "dirty.txt"), []byte("dirty"), 0644))
 
-	activity := AutoActivity(manifest.RepoInfo{Name: "dirty-repo", Path: repoDir, Branch: "master"})
+	activity := InspectRepoActivity(manifest.RepoInfo{Name: "dirty-repo", Path: repoDir, Branch: "master"}, 0)
 	assert.NoError(t, activity.Err)
 	assert.True(t, activity.Dirty)
 	assert.False(t, activity.RecentLocalCommit)
-	assert.True(t, activity.MatchesAuto())
 }
 
-func TestAutoActivity_RecentLocalCommitMatches(t *testing.T) {
+func TestInspectRepoActivity_RecentLocalCommitMatchesWithinWindow(t *testing.T) {
 	dir := t.TempDir()
 	repoDir := initTestRepo(t, dir, "recent-repo")
 	cmd := exec.Command("git", "config", "user.email", "local@example.com")
@@ -188,14 +187,13 @@ func TestAutoActivity_RecentLocalCommitMatches(t *testing.T) {
 	require.NoError(t, cmd.Run())
 	commitEmptyAt(t, repoDir, "recent work", "Local User", "local@example.com", time.Now().Add(-48*time.Hour))
 
-	activity := AutoActivity(manifest.RepoInfo{Name: "recent-repo", Path: repoDir, Branch: "master"})
+	activity := InspectRepoActivity(manifest.RepoInfo{Name: "recent-repo", Path: repoDir, Branch: "master"}, 7*24*time.Hour)
 	assert.NoError(t, activity.Err)
 	assert.False(t, activity.Dirty)
 	assert.True(t, activity.RecentLocalCommit)
-	assert.True(t, activity.MatchesAuto())
 }
 
-func TestAutoActivity_OldCommitDoesNotMatch(t *testing.T) {
+func TestInspectRepoActivity_RecentLocalCommitRespectsWindow(t *testing.T) {
 	dir := t.TempDir()
 	repoDir := initTestRepo(t, dir, "old-repo")
 	cmd := exec.Command("git", "config", "user.email", "old@example.com")
@@ -204,16 +202,15 @@ func TestAutoActivity_OldCommitDoesNotMatch(t *testing.T) {
 	cmd = exec.Command("git", "config", "user.name", "Old User")
 	cmd.Dir = repoDir
 	require.NoError(t, cmd.Run())
-	commitEmptyAt(t, repoDir, "old work", "Old User", "old@example.com", time.Now().Add(-30*24*time.Hour))
+	commitEmptyAt(t, repoDir, "recent enough for a week, not for a day", "Old User", "old@example.com", time.Now().Add(-48*time.Hour))
 
-	activity := AutoActivity(manifest.RepoInfo{Name: "old-repo", Path: repoDir, Branch: "master"})
+	activity := InspectRepoActivity(manifest.RepoInfo{Name: "old-repo", Path: repoDir, Branch: "master"}, 24*time.Hour)
 	assert.NoError(t, activity.Err)
 	assert.False(t, activity.Dirty)
 	assert.False(t, activity.RecentLocalCommit)
-	assert.False(t, activity.MatchesAuto())
 }
 
-func TestAutoActivity_LinkedWorktreeDirtyMatches(t *testing.T) {
+func TestInspectRepoActivity_LinkedWorktreeDirtyMatches(t *testing.T) {
 	dir := t.TempDir()
 	repoDir := initTestRepo(t, dir, "worktree-repo")
 	cmd := exec.Command("git", "config", "user.email", "other@example.com")
@@ -225,10 +222,9 @@ func TestAutoActivity_LinkedWorktreeDirtyMatches(t *testing.T) {
 	worktreeDir := addTestWorktree(t, repoDir, "worktree-feature", "feature/auto")
 	require.NoError(t, os.WriteFile(filepath.Join(worktreeDir, "dirty.txt"), []byte("dirty"), 0644))
 
-	activity := AutoActivity(manifest.RepoInfo{Name: "worktree-repo", Path: repoDir, Branch: "master"})
+	activity := InspectRepoActivity(manifest.RepoInfo{Name: "worktree-repo", Path: repoDir, Branch: "master"}, 0)
 	assert.NoError(t, activity.Err)
 	assert.True(t, activity.Dirty)
-	assert.True(t, activity.MatchesAuto())
 }
 
 func TestStatus_DetachedHead(t *testing.T) {

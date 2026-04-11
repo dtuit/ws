@@ -51,7 +51,10 @@ func validateContextGroupName(m *manifest.Manifest, group string) error {
 	}
 
 	switch group {
-	case "all", "none", "reset", autoFilterToken:
+	case "all", "none", "reset":
+		return fmt.Errorf("group %q uses a reserved filter name", group)
+	}
+	if _, ok, _ := parseActivityFilterToken(group); ok {
 		return fmt.Errorf("group %q uses a reserved filter name", group)
 	}
 

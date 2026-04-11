@@ -35,7 +35,10 @@ Use -- to escape built-in names:
 
 Filters:
   all                    All active repos (default)
-  auto                   Dirty repos plus local-user commits from last 14 days
+  dirty                  Repos with uncommitted changes
+  active[:dur]           dirty or local-user commits within dur
+  mine:<dur>             local-user commits within dur
+  dur                    Positive duration with s, m, h, d, or w suffix
   <group>                Group name: ai, eng, db, inf
   <group>,<group>        Comma-separated groups
   <repo>                 Individual repo name

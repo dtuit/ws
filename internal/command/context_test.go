@@ -62,7 +62,22 @@ repos:
 	require.Error(t, err)
 }
 
-func TestNormalizeContextFilter_AllowsAuto(t *testing.T) {
+func TestNormalizeContextFilter_RejectsInvalidActivityFilters(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+
+	for _, filter := range []string{"mine", "dirty:1d", "active:0", "mine:soon"} {
+		_, err = normalizeContextFilter(m, filter)
+		require.Error(t, err)
+	}
+}
+
+func TestNormalizeContextFilter_AllowsActivityFilters(t *testing.T) {
 	m, err := parseManifestYAML(`
 remotes:
   default: git@example.com
@@ -74,9 +89,9 @@ repos:
 `)
 	require.NoError(t, err)
 
-	filter, err := normalizeContextFilter(m, "backend,auto,auto")
+	filter, err := normalizeContextFilter(m, "backend,active,dirty,mine:1d,active:1d,active")
 	require.NoError(t, err)
-	assert.Equal(t, "backend,auto", filter)
+	assert.Equal(t, "backend,active,dirty,mine:1d,active:1d", filter)
 }
 
 func TestAddContext_MergesWithExistingContext(t *testing.T) {
@@ -103,7 +118,7 @@ repos:
 	assert.Equal(t, []string{"repo-a", "repo-c", "repo-b"}, state.Resolved)
 }
 
-func TestSetContext_AutoIncludesDirtyAndRecentRepos(t *testing.T) {
+func TestSetContext_ActiveIncludesDirtyAndRecentRepos(t *testing.T) {
 	wsHome := t.TempDir()
 	m, err := parseManifestYAML(`
 root: repos
@@ -135,16 +150,90 @@ repos:
 	runGit(t, repoC, "config", "user.name", "Other User")
 	runGit(t, repoC, "config", "user.email", "other@example.com")
 
-	require.NoError(t, SetContext(m, wsHome, autoFilterToken, false))
+	require.NoError(t, SetContext(m, wsHome, activeFilterToken, false))
 
 	state := readStoredContext(t, wsHome)
-	assert.Equal(t, autoFilterToken, state.Raw)
+	assert.Equal(t, activeFilterToken, state.Raw)
 	assert.Equal(t, []string{"repo-a", "repo-b"}, state.Resolved)
 	assertScopeEntries(t, wsHome, "repo-a", "repo-b")
 	assertWorkspaceFolders(t, filepath.Join(wsHome, m.Workspace), "~ workspace", "repo-a", "repo-b")
 }
 
-func TestAddContext_AutoCombinesWithExistingContext(t *testing.T) {
+func TestSetContext_ActiveDurationRestrictsRecentMatches(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+  repo-b:
+  repo-c:
+`)
+	require.NoError(t, err)
+
+	repoA := filepath.Join(wsHome, "repos", "repo-a")
+	repoB := filepath.Join(wsHome, "repos", "repo-b")
+	repoC := filepath.Join(wsHome, "repos", "repo-c")
+	initCheckout(t, repoA)
+	initCheckout(t, repoB)
+	initCheckout(t, repoC)
+
+	runGit(t, repoA, "config", "user.name", "Other User")
+	runGit(t, repoA, "config", "user.email", "other@example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(repoA, "dirty.txt"), []byte("dirty\n"), 0644))
+
+	runGit(t, repoB, "config", "user.name", "Local User")
+	runGit(t, repoB, "config", "user.email", "local@example.com")
+	commitEmptyAt(t, repoB, "recent work", "Local User", "local@example.com", time.Now().Add(-48*time.Hour))
+
+	runGit(t, repoC, "config", "user.name", "Other User")
+	runGit(t, repoC, "config", "user.email", "other@example.com")
+
+	require.NoError(t, SetContext(m, wsHome, "active:1d", false))
+
+	state := readStoredContext(t, wsHome)
+	assert.Equal(t, "active:1d", state.Raw)
+	assert.Equal(t, []string{"repo-a"}, state.Resolved)
+	assertScopeEntries(t, wsHome, "repo-a")
+}
+
+func TestSetContext_MineDurationIncludesOnlyRecentLocalCommits(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+
+	repoA := filepath.Join(wsHome, "repos", "repo-a")
+	repoB := filepath.Join(wsHome, "repos", "repo-b")
+	initCheckout(t, repoA)
+	initCheckout(t, repoB)
+
+	runGit(t, repoA, "config", "user.name", "Local User")
+	runGit(t, repoA, "config", "user.email", "local@example.com")
+	commitEmptyAt(t, repoA, "recent work", "Local User", "local@example.com", time.Now().Add(-12*time.Hour))
+	require.NoError(t, os.WriteFile(filepath.Join(repoA, "dirty.txt"), []byte("dirty\n"), 0644))
+
+	runGit(t, repoB, "config", "user.name", "Other User")
+	runGit(t, repoB, "config", "user.email", "other@example.com")
+
+	require.NoError(t, SetContext(m, wsHome, "mine:1d", false))
+
+	state := readStoredContext(t, wsHome)
+	assert.Equal(t, "mine:1d", state.Raw)
+	assert.Equal(t, []string{"repo-a"}, state.Resolved)
+	assertScopeEntries(t, wsHome, "repo-a")
+}
+
+func TestAddContext_ActiveCombinesWithExistingContext(t *testing.T) {
 	wsHome := t.TempDir()
 	m, err := parseManifestYAML(`
 root: repos
@@ -177,10 +266,10 @@ repos:
 	runGit(t, repoC, "config", "user.email", "other@example.com")
 
 	require.NoError(t, SetContext(m, wsHome, "repo-b", false))
-	require.NoError(t, AddContext(m, wsHome, autoFilterToken, false))
+	require.NoError(t, AddContext(m, wsHome, activeFilterToken, false))
 
 	state := readStoredContext(t, wsHome)
-	assert.Equal(t, "repo-b,auto", state.Raw)
+	assert.Equal(t, "repo-b,active", state.Raw)
 	assert.Equal(t, []string{"repo-b", "repo-a"}, state.Resolved)
 	assertScopeEntries(t, wsHome, "repo-a", "repo-b")
 	assertWorkspaceFolders(t, filepath.Join(wsHome, m.Workspace), "~ workspace", "repo-b", "repo-a")

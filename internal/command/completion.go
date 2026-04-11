@@ -326,7 +326,13 @@ func globalFlagSuggestions() []string {
 }
 
 func filterSuggestions(m *manifest.Manifest) []string {
-	values := []string{"all", autoFilterToken}
+	values := []string{
+		"all",
+		activeFilterToken,
+		activeFilterToken + ":1d",
+		dirtyFilterToken,
+		mineFilterToken + ":1d",
+	}
 	if m == nil {
 		return values
 	}
@@ -373,12 +379,14 @@ func isFilterToken(m *manifest.Manifest, token string) bool {
 
 	for _, part := range strings.Split(token, ",") {
 		part = strings.TrimSpace(part)
-		switch part {
-		case "", "all", autoFilterToken:
-			if part != "" {
-				return true
-			}
+		if part == "" {
 			continue
+		}
+		if part == "all" {
+			return true
+		}
+		if _, ok, _ := parseActivityFilterToken(part); ok {
+			return true
 		}
 
 		if m == nil {

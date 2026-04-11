@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dtuit/ws/internal/manifest"
 )
@@ -47,15 +48,13 @@ type BranchList struct {
 	Err      error
 }
 
-// RepoActivity summarizes whether a repo should be included by the auto filter.
+// RepoActivity summarizes local activity discovered for a repo.
 type RepoActivity struct {
 	Name              string
 	Dirty             bool
 	RecentLocalCommit bool
 	Err               error
 }
-
-const autoRecentWindowDays = 14
 
 // Symbols returns a compact status string like gita: +*?$ for dirty indicators.
 func (s RepoStatus) Symbols() string {
@@ -94,11 +93,6 @@ func (s RepoStatus) SyncSymbol() string {
 // IsDirty returns true if the working tree has any local changes.
 func (s RepoStatus) IsDirty() bool {
 	return s.Staged || s.Unstaged || s.Untracked
-}
-
-// MatchesAuto reports whether the repo should be included by the auto filter.
-func (s RepoActivity) MatchesAuto() bool {
-	return s.Dirty || s.RecentLocalCommit
 }
 
 // gitCmd runs a git command in the given directory and returns trimmed stdout.
@@ -250,8 +244,9 @@ func StatusAll(repos []manifest.RepoInfo, maxWorkers int) []RepoStatus {
 	return results
 }
 
-// AutoActivity inspects a repo and its linked worktrees for auto-filter matches.
-func AutoActivity(repo manifest.RepoInfo) RepoActivity {
+// InspectRepoActivity inspects a repo and its linked worktrees for local activity.
+// recentWindow controls the local-commit check; values <= 0 disable it.
+func InspectRepoActivity(repo manifest.RepoInfo, recentWindow time.Duration) RepoActivity {
 	activity := RepoActivity{Name: repo.Name}
 
 	worktrees, err := DiscoverWorktrees(repo)
@@ -261,7 +256,7 @@ func AutoActivity(repo manifest.RepoInfo) RepoActivity {
 	}
 
 	for _, worktree := range worktrees {
-		dirty, recentLocalCommit, err := autoActivityForCheckout(worktree.Path)
+		dirty, recentLocalCommit, err := inspectCheckoutActivity(worktree.Path, recentWindow)
 		if err != nil {
 			activity.Err = err
 			return activity
@@ -269,7 +264,7 @@ func AutoActivity(repo manifest.RepoInfo) RepoActivity {
 
 		activity.Dirty = activity.Dirty || dirty
 		activity.RecentLocalCommit = activity.RecentLocalCommit || recentLocalCommit
-		if activity.MatchesAuto() {
+		if activity.Dirty && (recentWindow <= 0 || activity.RecentLocalCommit) {
 			return activity
 		}
 	}
@@ -277,8 +272,8 @@ func AutoActivity(repo manifest.RepoInfo) RepoActivity {
 	return activity
 }
 
-// AutoActivityAll inspects repos for auto-filter matches in parallel.
-func AutoActivityAll(repos []manifest.RepoInfo, maxWorkers int) []RepoActivity {
+// InspectRepoActivityAll inspects repos for local activity in parallel.
+func InspectRepoActivityAll(repos []manifest.RepoInfo, recentWindow time.Duration, maxWorkers int) []RepoActivity {
 	results := make([]RepoActivity, len(repos))
 	sem := make(chan struct{}, maxWorkers)
 	var wg sync.WaitGroup
@@ -289,7 +284,7 @@ func AutoActivityAll(repos []manifest.RepoInfo, maxWorkers int) []RepoActivity {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[idx] = AutoActivity(r)
+			results[idx] = InspectRepoActivity(r, recentWindow)
 		}(i, repo)
 	}
 
@@ -420,7 +415,7 @@ func Clone(repo manifest.RepoInfo) error {
 	return cmd.Run()
 }
 
-func autoActivityForCheckout(repoDir string) (bool, bool, error) {
+func inspectCheckoutActivity(repoDir string, recentWindow time.Duration) (bool, bool, error) {
 	if _, err := GitDir(repoDir); err != nil {
 		return false, false, err
 	}
@@ -432,8 +427,13 @@ func autoActivityForCheckout(repoDir string) (bool, bool, error) {
 
 	var status RepoStatus
 	parseStatusV2(&status, statusOut)
-	if status.IsDirty() {
+	if status.IsDirty() && recentWindow <= 0 {
 		return true, false, nil
+	}
+
+	dirty := status.IsDirty()
+	if recentWindow <= 0 {
+		return dirty, false, nil
 	}
 
 	email, name, err := localGitIdentity(repoDir)
@@ -444,11 +444,11 @@ func autoActivityForCheckout(repoDir string) (bool, bool, error) {
 		return false, false, nil
 	}
 
-	recentLocalCommit, err := hasRecentCommitByLocalUser(repoDir, email, name)
+	recentLocalCommit, err := hasRecentCommitByLocalUser(repoDir, email, name, recentWindow)
 	if err != nil {
 		return false, false, err
 	}
-	return false, recentLocalCommit, nil
+	return dirty, recentLocalCommit, nil
 }
 
 func localGitIdentity(repoDir string) (string, string, error) {
@@ -482,8 +482,12 @@ func gitConfigValue(repoDir, key string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-func hasRecentCommitByLocalUser(repoDir, email, name string) (bool, error) {
-	since := fmt.Sprintf("--since=%d days ago", autoRecentWindowDays)
+func hasRecentCommitByLocalUser(repoDir, email, name string, recentWindow time.Duration) (bool, error) {
+	if recentWindow <= 0 {
+		return false, nil
+	}
+
+	since := fmt.Sprintf("--since=%d seconds ago", int64(recentWindow/time.Second))
 	out, err := gitCmdRaw(repoDir, "log", since, "--format=%ce\x1f%cn")
 	if err != nil {
 		if isNoCommitsError(err) {

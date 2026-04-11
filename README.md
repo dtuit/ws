@@ -204,7 +204,7 @@ With that loaded, `ws` completes built-in commands, filters, repo names, and fal
 | See repo status across the current scope | `ws ll` |
 | See all local branches in ll format | `ws ll --branches` |
 | Narrow the workspace to a group | `ws context backend` |
-| Snapshot active work into the context | `ws context auto` |
+| Snapshot active work into the context | `ws context active` |
 | Add one more repo to the current scope | `ws context add web-app` |
 | Run a command across a group | `ws backend git status` |
 | Open the generated VS Code workspace | `ws open` |
@@ -272,12 +272,17 @@ ws -- fetch data.json
 Filters apply to `ll`, `setup`, `fetch`, `pull`, `context`, and fan-out commands.
 
 - `all`: every active repo from the merged manifest
-- `auto`: repos with uncommitted changes, plus repos whose current branch has a commit from the configured local git user in the last 14 days
+- `dirty`: repos with uncommitted changes
+- `active`: repos that are dirty or have a local-user commit in the last 14 days
+- `active:1d`: same as `active`, but with a custom recent window
+- `mine:1d`: repos with a local-user commit in the given recent window
 - `backend`: a group name
 - `backend,ops`: multiple groups
-- `backend,auto`: combine named filters with the dynamic auto selector
+- `backend,active:1w`: combine named filters with activity selectors
 - `api-server`: an individual repo
 - `api-server@api-server-feature`: an explicit worktree target
+
+Recent-duration filters accept positive values with `s`, `m`, `h`, `d`, or `w` suffixes.
 
 For `ws context`, `none` or `reset` clears the saved context.
 `ws ctx <filter>` is shorthand for `ws context <filter>`.
@@ -311,10 +316,10 @@ For `ws context all`, `ws context none`, and `ws context reset`, the generated s
 That makes the workspace repo useful as an agent entry point:
 
 - run `ws context backend` before starting focused work
-- run `ws context auto` when you want a quick scope based on active local work
+- run `ws context active` when you want a quick scope based on active local work
 - run `ws open` when you want to open the current generated workspace in VS Code
 - run `ws context add repo-x` when you want to widen that scope without replacing it
-- run `ws context add auto` when you want to union the current scope with repos that have fresh local activity
+- run `ws context add active:1d` when you want to union the current scope with very recent local activity
 - run `ws context remove repo-x` when you want to narrow the current scope without rebuilding it from scratch
 - run `ws context save focus` when you want to snapshot the current scope into `manifest.yml`
 - run `ws context save --local scratch` when the saved group should live only in `manifest.local.yml`
