@@ -202,6 +202,7 @@ With that loaded, `ws` completes built-in commands, filters, repo names, and fal
 |---|---|
 | Clone any missing repos | `ws setup` |
 | See repo status across the current scope | `ws ll` |
+| See all local branches in ll format | `ws ll --branches` |
 | Narrow the workspace to a group | `ws context backend` |
 | Add one more repo to the current scope | `ws context add web-app` |
 | Run a command across a group | `ws backend git status` |
@@ -223,6 +224,8 @@ Core commands:
 ```text
 ws ll [filter]
                           Dashboard: branch, dirty state, last commit
+ws ll [--branches|-b] [filter]
+                          Show all local branches in ll format
 ws list [--all]
                           Show repos in the manifest (--all includes excluded)
 ws setup [filter]         Clone missing repos
@@ -285,7 +288,7 @@ Use groups for named subsets. The default `all` filter includes every active rep
 - Set `worktrees: true` in `manifest.local.yml` to make worktree-aware behavior the default across `list`, `ll`, `pull`, `context`, and fan-out commands.
 - Without that setting, commands default to the manifest checkout for each repo.
 - `ws list` shows a `WT` count for each repo; worktree mode expands it to one row per checkout.
-- `ws ll`, `ws pull`, `ws context`, and `ws <command...>` follow the same worktree mode instead of each command behaving differently.
+- `ws ll`, `ws ll --branches`, `ws pull`, `ws context`, and `ws <command...>` follow the same worktree mode instead of each command behaving differently.
 - Use `-t` or `--worktrees` to enable worktree mode for one command, or `--no-worktrees` to disable it for one command.
 - `ws cd api-server -t feature/auth` resolves a linked worktree by unique branch, path basename, or exact path.
 - `ws cd api-server@api-server-feature` is shorthand for selecting a worktree by its checkout name.

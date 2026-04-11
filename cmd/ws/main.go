@@ -186,14 +186,15 @@ dispatch:
 		}
 
 	case command.CommandLL:
+		args, showBranches := command.StripLLBranchesFlags(args)
 		args, localWorktrees := command.StripWorktreesFlags(args)
 		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
 		defaultFilter, hasDefaultFilter := command.GetDefaultContextForMode(m, wsHome, includeWorktrees)
-		filter, err := parseOptionalFilterArg(args, defaultFilter, hasDefaultFilter, "ws ll [filter] ["+command.WorktreesFlagUsage+"]")
+		filter, err := parseOptionalFilterArg(args, defaultFilter, hasDefaultFilter, "ws ll ["+command.LLBranchesFlagUsage+"] [filter] ["+command.WorktreesFlagUsage+"]")
 		if err != nil {
 			fatal(err)
 		}
-		if err := command.LL(m, wsHome, filter, includeWorktrees); err != nil {
+		if err := command.LL(m, wsHome, filter, includeWorktrees, command.LLMode{ShowBranches: showBranches}); err != nil {
 			fatal(err)
 		}
 

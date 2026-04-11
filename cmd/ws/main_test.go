@@ -73,6 +73,7 @@ func TestUsageTextIncludesSharedCommandHelp(t *testing.T) {
 	assert.Contains(t, text, "context set <filter>")
 	assert.Contains(t, text, "ctx [filter]")
 	assert.Contains(t, text, "ll [filter]")
+	assert.Contains(t, text, "ll [--branches|-b] [filter]")
 	assert.Contains(t, text, "cd [repo[@worktree]] [--worktree|-t <selector>]")
 	assert.Contains(t, text, "\"none\" or \"reset\" = clear")
 	assert.Contains(t, text, "Worktree options:")

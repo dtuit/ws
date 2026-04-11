@@ -102,6 +102,8 @@ repos:
 	require.NoError(t, err)
 
 	result := Complete(m, []string{"ll", ""}, 1)
+	assert.Contains(t, result.Values, "-b")
+	assert.Contains(t, result.Values, "--branches")
 	assert.Contains(t, result.Values, "-t")
 	assert.Contains(t, result.Values, "--no-worktrees")
 	assert.Contains(t, result.Values, "--worktrees")

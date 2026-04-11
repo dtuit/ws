@@ -51,8 +51,9 @@ var builtinCommands = []BuiltinCommand{
 		ShowInUsage: true,
 		Help: []HelpEntry{
 			{Usage: "ll [filter]", Description: "Dashboard: branch, dirty, last commit"},
+			{Usage: "ll [" + LLBranchesFlagUsage + "] [filter]", Description: "Show all local branches in ll format"},
 		},
-		complete: completeLLOrPullCommand,
+		complete: completeLLCommand,
 	},
 	{
 		Name:        CommandCD,

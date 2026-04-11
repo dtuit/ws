@@ -43,6 +43,10 @@ func TestBuiltinUsageEntries(t *testing.T) {
 		Description: "Dashboard: branch, dirty, last commit",
 	})
 	assert.Contains(t, entries, HelpEntry{
+		Usage:       "ll [--branches|-b] [filter]",
+		Description: "Show all local branches in ll format",
+	})
+	assert.Contains(t, entries, HelpEntry{
 		Usage:       "cd [repo[@worktree]] [--worktree|-t <selector>]",
 		Description: "Print repo path (no arg = workspace root)",
 	})

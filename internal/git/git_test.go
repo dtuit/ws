@@ -309,3 +309,47 @@ func TestWorkers_EnvOverride(t *testing.T) {
 	t.Setenv("WS_WORKERS", "8")
 	assert.Equal(t, 8, Workers(100))
 }
+
+func TestParseLocalBranchTrack(t *testing.T) {
+	ahead, behind, noRemote := parseLocalBranchTrack("origin/main", "[ahead 2, behind 1]")
+	assert.Equal(t, 2, ahead)
+	assert.Equal(t, 1, behind)
+	assert.False(t, noRemote)
+
+	ahead, behind, noRemote = parseLocalBranchTrack("origin/main", "")
+	assert.Equal(t, 0, ahead)
+	assert.Equal(t, 0, behind)
+	assert.False(t, noRemote)
+
+	ahead, behind, noRemote = parseLocalBranchTrack("", "")
+	assert.Equal(t, 0, ahead)
+	assert.Equal(t, 0, behind)
+	assert.True(t, noRemote)
+
+	ahead, behind, noRemote = parseLocalBranchTrack("origin/main", "[gone]")
+	assert.Equal(t, 0, ahead)
+	assert.Equal(t, 0, behind)
+	assert.True(t, noRemote)
+}
+
+func TestParseLocalBranchList(t *testing.T) {
+	out := "*\tmaster\torigin/master\t[ahead 1]\tinitial commit\t2 days ago\n \tfeature/auth\t\t\tadd auth\t1 hour ago\n"
+
+	branches, err := parseLocalBranchList(out)
+	require.NoError(t, err)
+	require.Len(t, branches, 2)
+
+	assert.Equal(t, "master", branches[0].Name)
+	assert.True(t, branches[0].Current)
+	assert.Equal(t, 1, branches[0].Ahead)
+	assert.Equal(t, 0, branches[0].Behind)
+	assert.False(t, branches[0].NoRemote)
+	assert.Equal(t, "initial commit", branches[0].CommitMsg)
+	assert.Equal(t, "2 days ago", branches[0].CommitAge)
+
+	assert.Equal(t, "feature/auth", branches[1].Name)
+	assert.False(t, branches[1].Current)
+	assert.True(t, branches[1].NoRemote)
+	assert.Equal(t, "add auth", branches[1].CommitMsg)
+	assert.Equal(t, "1 hour ago", branches[1].CommitAge)
+}

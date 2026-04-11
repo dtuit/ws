@@ -29,6 +29,24 @@ type RepoStatus struct {
 	Err       error
 }
 
+// LocalBranchInfo holds metadata for one local branch in a checkout.
+type LocalBranchInfo struct {
+	Name      string
+	Current   bool
+	Ahead     int
+	Behind    int
+	NoRemote  bool
+	CommitMsg string
+	CommitAge string
+}
+
+// BranchList holds the local branch listing for a single checkout.
+type BranchList struct {
+	Name     string
+	Branches []LocalBranchInfo
+	Err      error
+}
+
 // Symbols returns a compact status string like gita: +*?$ for dirty indicators.
 func (s RepoStatus) Symbols() string {
 	var b strings.Builder
@@ -70,6 +88,15 @@ func (s RepoStatus) IsDirty() bool {
 
 // gitCmd runs a git command in the given directory and returns trimmed stdout.
 func gitCmd(dir string, args ...string) (string, error) {
+	out, err := gitCmdRaw(dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// gitCmdRaw runs a git command in the given directory and returns raw stdout.
+func gitCmdRaw(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
@@ -78,7 +105,7 @@ func gitCmd(dir string, args ...string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("%s: %w", strings.TrimSpace(stderr.String()), err)
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }
 
 // Status queries the git status of a single repo.
@@ -206,6 +233,109 @@ func StatusAll(repos []manifest.RepoInfo, maxWorkers int) []RepoStatus {
 
 	wg.Wait()
 	return results
+}
+
+const localBranchFormat = "%(if)%(HEAD)%(then)*%(else) %(end)\t%(refname:short)\t%(upstream:short)\t%(upstream:track)\t%(subject)\t%(committerdate:relative)"
+
+// LocalBranches queries the local branch list for a single repo/worktree.
+func LocalBranches(repoDir, name string) BranchList {
+	info := BranchList{Name: name}
+
+	if _, err := GitDir(repoDir); err != nil {
+		info.Err = ErrNotCloned
+		return info
+	}
+
+	branchOut, err := gitCmdRaw(repoDir, "for-each-ref", "--format="+localBranchFormat, "refs/heads")
+	if err != nil {
+		info.Err = err
+		return info
+	}
+
+	branches, err := parseLocalBranchList(branchOut)
+	if err != nil {
+		info.Err = err
+		return info
+	}
+	info.Branches = branches
+	return info
+}
+
+// LocalBranchesAll queries the local branch list for multiple repos in parallel.
+func LocalBranchesAll(repos []manifest.RepoInfo, maxWorkers int) []BranchList {
+	results := make([]BranchList, len(repos))
+	sem := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+
+	for i, repo := range repos {
+		wg.Add(1)
+		go func(idx int, r manifest.RepoInfo) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			results[idx] = LocalBranches(r.Path, r.Name)
+		}(i, repo)
+	}
+
+	wg.Wait()
+	return results
+}
+
+func parseLocalBranchList(output string) ([]LocalBranchInfo, error) {
+	output = strings.TrimRight(output, "\n")
+	if output == "" {
+		return nil, nil
+	}
+
+	lines := strings.Split(output, "\n")
+	branches := make([]LocalBranchInfo, 0, len(lines))
+	for _, line := range lines {
+		fields := strings.SplitN(line, "\t", 6)
+		if len(fields) != 6 {
+			return nil, fmt.Errorf("unexpected branch metadata output")
+		}
+
+		ahead, behind, noRemote := parseLocalBranchTrack(fields[2], fields[3])
+		branches = append(branches, LocalBranchInfo{
+			Name:      fields[1],
+			Current:   strings.TrimSpace(fields[0]) == "*",
+			Ahead:     ahead,
+			Behind:    behind,
+			NoRemote:  noRemote,
+			CommitMsg: fields[4],
+			CommitAge: fields[5],
+		})
+	}
+
+	return branches, nil
+}
+
+func parseLocalBranchTrack(upstream, track string) (ahead, behind int, noRemote bool) {
+	upstream = strings.TrimSpace(upstream)
+	track = strings.TrimSpace(track)
+
+	switch {
+	case upstream == "":
+		return 0, 0, true
+	case track == "" || track == "[]":
+		return 0, 0, false
+	case track == "[gone]":
+		return 0, 0, true
+	}
+
+	track = strings.TrimPrefix(track, "[")
+	track = strings.TrimSuffix(track, "]")
+	for _, part := range strings.Split(track, ",") {
+		part = strings.TrimSpace(part)
+		switch {
+		case strings.HasPrefix(part, "ahead "):
+			ahead, _ = strconv.Atoi(strings.TrimPrefix(part, "ahead "))
+		case strings.HasPrefix(part, "behind "):
+			behind, _ = strconv.Atoi(strings.TrimPrefix(part, "behind "))
+		}
+	}
+
+	return ahead, behind, false
 }
 
 // Exec runs a command in each repo dir in parallel, printing prefixed output.

@@ -126,6 +126,10 @@ func completeFetchCommand(m *manifest.Manifest, args []string, current int) Comp
 	return CompletionResult{}
 }
 
+func completeLLCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	return completeFilterCommand(m, args, current, llFlagSuggestions())
+}
+
 func completeLLOrPullCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
 	return completeFilterCommand(m, args, current, worktreesFlagSuggestions())
 }

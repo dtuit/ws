@@ -17,8 +17,13 @@ const (
 	llDefaultMessageWidth = 60
 )
 
+// LLMode controls optional ll output extensions.
+type LLMode struct {
+	ShowBranches bool
+}
+
 // LL displays a dashboard of repo status: branch, dirty state, last commit.
-func LL(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) error {
+func LL(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool, mode LLMode) error {
 	repos, err := resolveCommandRepos(m, wsHome, filter, includeWorktrees)
 	if err != nil {
 		return err
@@ -39,6 +44,10 @@ func LL(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) erro
 
 	workers := git.Workers(len(repos))
 	statuses := git.StatusAll(repos, workers)
+	var branchLists []git.BranchList
+	if mode.ShowBranches {
+		branchLists = git.LocalBranchesAll(repos, workers)
+	}
 	termWidth := llTerminalWidth()
 
 	// Calculate column widths
@@ -51,71 +60,114 @@ func LL(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) erro
 			maxBranch = len(s.Branch)
 		}
 	}
+	for _, list := range branchLists {
+		for _, branch := range list.Branches {
+			if len(branch.Name) > maxBranch {
+				maxBranch = len(branch.Name)
+			}
+		}
+	}
 
-	for _, s := range statuses {
-		nameStr := formatLLName(s.Name, maxName, term.Red)
-		if s.Err != nil {
-			fmt.Printf("%s  %s\n", nameStr, term.Colorize(term.Red, s.Err.Error()))
+	for i, s := range statuses {
+		printLLStatusLine(s, maxName, maxBranch, termWidth, worktreeExtras, true)
+		if !mode.ShowBranches || s.Err != nil {
 			continue
 		}
-
-		// Status symbols: +staged *unstaged ?untracked $stashed
-		symbols := s.Symbols()
-		sync := s.SyncSymbol()
-
-		// Color based on state
-		var color string
-		switch {
-		case s.Branch == "(detached)":
-			color = term.Red
-		case s.Ahead > 0 && s.Behind > 0:
-			color = term.Red
-		case s.Ahead > 0:
-			color = term.Magenta
-		case s.Behind > 0:
-			color = term.Yellow
-		case s.IsDirty():
-			color = term.Yellow
-		case s.NoRemote:
-			color = term.Cyan
-		default:
-			color = term.Green
-		}
-
-		// Pad symbols to fixed width for alignment
-		symbolStr := fmt.Sprintf("%-4s", symbols)
-		syncStr := fmt.Sprintf("%-4s", sync)
-		statusText := fmt.Sprintf("  %-*s %s[%s]", maxBranch, s.Branch, syncStr, symbolStr)
-
-		ageSuffix := ""
-		if s.CommitAge != "" {
-			ageSuffix = " (" + s.CommitAge + ")"
-		}
-		extrasSuffix := ""
-		if extra := worktreeExtras[s.Name]; extra > 0 {
-			extrasSuffix = fmt.Sprintf(" [+%d wt]", extra)
-		}
-
-		nameStr = formatLLName(s.Name, maxName, color)
-		statusStr := term.Colorize(color, statusText)
-		prefix := nameStr + statusStr
-		prefixWidth := maxName + utf8.RuneCountInString(statusText)
-
-		detailPlain, detailColored := formatLLDetail(s.CommitMsg, ageSuffix, extrasSuffix, 0)
-		if termWidth > 0 && prefixWidth+2+utf8.RuneCountInString(detailPlain) > termWidth {
-			indentWidth := llDetailIndentWidth(maxName, termWidth)
-			indent := strings.Repeat(" ", indentWidth)
-			_, wrappedDetail := formatLLDetail(s.CommitMsg, ageSuffix, extrasSuffix, termWidth-indentWidth)
-			fmt.Printf("%s\n%s%s\n", prefix, indent, wrappedDetail)
+		if branchLists[i].Err != nil {
+			printLLStatusLine(git.RepoStatus{Name: "", Err: branchLists[i].Err}, maxName, maxBranch, termWidth, nil, true)
 			continue
 		}
-
-		fmt.Printf("%s  %s\n", prefix, detailColored)
+		for _, branch := range branchLists[i].Branches {
+			if branch.Current {
+				continue
+			}
+			printLLStatusLine(repoStatusFromLocalBranch(branch), maxName, maxBranch, termWidth, nil, false)
+		}
 	}
 	return nil
 }
 
+func repoStatusFromLocalBranch(branch git.LocalBranchInfo) git.RepoStatus {
+	return git.RepoStatus{
+		Name:      "",
+		Branch:    branch.Name,
+		Ahead:     branch.Ahead,
+		Behind:    branch.Behind,
+		NoRemote:  branch.NoRemote,
+		CommitMsg: branch.CommitMsg,
+		CommitAge: branch.CommitAge,
+	}
+}
+
+func printLLStatusLine(s git.RepoStatus, maxName, maxBranch, termWidth int, worktreeExtras map[string]int, showEmptySymbols bool) {
+	nameStr := formatLLName(s.Name, maxName, term.Red)
+	if s.Err != nil {
+		fmt.Printf("%s  %s\n", nameStr, term.Colorize(term.Red, s.Err.Error()))
+		return
+	}
+
+	// Status symbols: +staged *unstaged ?untracked $stashed
+	symbols := s.Symbols()
+	sync := s.SyncSymbol()
+
+	// Color based on state
+	color := llStatusColor(s)
+
+	syncStr := fmt.Sprintf("%-4s", sync)
+	statusText := fmt.Sprintf("  %-*s %s", maxBranch, s.Branch, syncStr)
+	if showEmptySymbols || symbols != "" {
+		statusText += fmt.Sprintf("[%s]", fmt.Sprintf("%-4s", symbols))
+	}
+
+	ageSuffix := ""
+	if s.CommitAge != "" {
+		ageSuffix = " (" + s.CommitAge + ")"
+	}
+	extrasSuffix := ""
+	if extra := worktreeExtras[s.Name]; extra > 0 {
+		extrasSuffix = fmt.Sprintf(" [+%d wt]", extra)
+	}
+
+	nameStr = formatLLName(s.Name, maxName, color)
+	statusStr := term.Colorize(color, statusText)
+	prefix := nameStr + statusStr
+	prefixWidth := maxName + utf8.RuneCountInString(statusText)
+
+	detailPlain, detailColored := formatLLDetail(s.CommitMsg, ageSuffix, extrasSuffix, 0)
+	if termWidth > 0 && prefixWidth+2+utf8.RuneCountInString(detailPlain) > termWidth {
+		indentWidth := llDetailIndentWidth(maxName, termWidth)
+		indent := strings.Repeat(" ", indentWidth)
+		_, wrappedDetail := formatLLDetail(s.CommitMsg, ageSuffix, extrasSuffix, termWidth-indentWidth)
+		fmt.Printf("%s\n%s%s\n", prefix, indent, wrappedDetail)
+		return
+	}
+
+	fmt.Printf("%s  %s\n", prefix, detailColored)
+}
+
+func llStatusColor(s git.RepoStatus) string {
+	switch {
+	case s.Branch == "(detached)":
+		return term.Red
+	case s.Ahead > 0 && s.Behind > 0:
+		return term.Red
+	case s.Ahead > 0:
+		return term.Magenta
+	case s.Behind > 0:
+		return term.Yellow
+	case s.IsDirty():
+		return term.Yellow
+	case s.NoRemote:
+		return term.Cyan
+	default:
+		return term.Green
+	}
+}
+
 func formatLLName(name string, width int, color string) string {
+	if name == "" {
+		return strings.Repeat(" ", width)
+	}
 	padding := width - len(name)
 	if padding < 0 {
 		padding = 0
