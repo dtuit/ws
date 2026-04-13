@@ -14,6 +14,7 @@ import (
 type Manifest struct {
 	Root          string              // directory where repos live, relative to manifest dir
 	Workspace     string              // VS Code workspace filename (default "ws.code-workspace")
+	Scopes        []ScopeDirConfig    // generated symlink directories for scoped repo views
 	Worktrees     bool                // default worktree expansion behavior for supported commands
 	Remotes       map[string]string   // name → URL prefix ("default" is the fallback)
 	DefaultBranch string              // default branch for all repos
@@ -21,6 +22,19 @@ type Manifest struct {
 	Repos         map[string]RepoConfig
 	Exclude       []string
 	worktreesSet  bool
+	scopesSet     bool
+}
+
+const (
+	DefaultScopeDir    = ".scope"
+	ScopeSourceContext = "context"
+	ScopeSourceAll     = "all"
+)
+
+// ScopeDirConfig describes one generated symlink directory in the workspace.
+type ScopeDirConfig struct {
+	Dir    string // workspace-relative path for the generated symlink directory
+	Source string // one of ScopeSourceContext or ScopeSourceAll
 }
 
 // RepoConfig holds per-repo overrides.
@@ -45,12 +59,18 @@ type RepoInfo struct {
 type rawManifest struct {
 	Root      string                       `yaml:"root"`      // where repos live
 	Workspace string                       `yaml:"workspace"` // VS Code workspace filename
+	Scopes    *[]rawScopeDir               `yaml:"scopes"`    // generated scope symlink directories
 	Worktrees *bool                        `yaml:"worktrees"` // default worktree behavior
 	Remotes   map[string]string            `yaml:"remotes"`   // named remotes
 	Branch    string                       `yaml:"branch"`
 	Groups    map[string][]string          `yaml:"groups"`
 	Repos     map[string]map[string]string `yaml:"repos"`
 	Exclude   []string                     `yaml:"exclude"`
+}
+
+type rawScopeDir struct {
+	Dir    string `yaml:"dir"`
+	Source string `yaml:"source"`
 }
 
 const maxManifestSize = 1 << 20 // 1MB
@@ -87,6 +107,7 @@ func parse(data []byte, requireRoot bool) (*Manifest, error) {
 	m := &Manifest{
 		Root:          raw.Root,
 		Workspace:     raw.Workspace,
+		Scopes:        defaultScopeDirs(),
 		Remotes:       make(map[string]string),
 		DefaultBranch: raw.Branch,
 		Groups:        raw.Groups,
@@ -99,6 +120,14 @@ func parse(data []byte, requireRoot bool) (*Manifest, error) {
 	}
 	if m.Workspace == "" {
 		m.Workspace = "ws.code-workspace"
+	}
+	if raw.Scopes != nil {
+		scopes, err := parseScopeDirs(*raw.Scopes)
+		if err != nil {
+			return nil, err
+		}
+		m.Scopes = scopes
+		m.scopesSet = true
 	}
 	if raw.Worktrees != nil {
 		m.Worktrees = *raw.Worktrees
@@ -197,6 +226,10 @@ func (m *Manifest) MergeLocal(path string) error {
 	if local.Workspace != "ws.code-workspace" {
 		m.Workspace = local.Workspace
 	}
+	if local.scopesSet {
+		m.Scopes = append([]ScopeDirConfig(nil), local.Scopes...)
+		m.scopesSet = true
+	}
 	if local.worktreesSet {
 		m.Worktrees = local.Worktrees
 		m.worktreesSet = true
@@ -229,6 +262,57 @@ func (m *Manifest) MergeLocal(path string) error {
 	}
 
 	return nil
+}
+
+func defaultScopeDirs() []ScopeDirConfig {
+	return []ScopeDirConfig{
+		{Dir: DefaultScopeDir, Source: ScopeSourceContext},
+	}
+}
+
+func parseScopeDirs(raw []rawScopeDir) ([]ScopeDirConfig, error) {
+	scopes := make([]ScopeDirConfig, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for i, cfg := range raw {
+		scope, err := normalizeScopeDirConfig(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("scopes[%d]: %w", i, err)
+		}
+		if seen[scope.Dir] {
+			return nil, fmt.Errorf("scopes[%d]: duplicate dir %q", i, scope.Dir)
+		}
+		seen[scope.Dir] = true
+		scopes = append(scopes, scope)
+	}
+	return scopes, nil
+}
+
+func normalizeScopeDirConfig(raw rawScopeDir) (ScopeDirConfig, error) {
+	dir := filepath.Clean(strings.TrimSpace(raw.Dir))
+	if dir == "" || dir == "." {
+		return ScopeDirConfig{}, fmt.Errorf("dir is required")
+	}
+	if filepath.IsAbs(dir) {
+		return ScopeDirConfig{}, fmt.Errorf("dir must be relative to the workspace")
+	}
+	if dir == ".." || strings.HasPrefix(dir, ".."+string(filepath.Separator)) {
+		return ScopeDirConfig{}, fmt.Errorf("dir must stay within the workspace")
+	}
+
+	source := strings.TrimSpace(raw.Source)
+	if source == "" {
+		source = ScopeSourceContext
+	}
+	switch source {
+	case ScopeSourceContext, ScopeSourceAll:
+	default:
+		return ScopeDirConfig{}, fmt.Errorf("unknown source %q", source)
+	}
+
+	return ScopeDirConfig{
+		Dir:    dir,
+		Source: source,
+	}, nil
 }
 
 // ResolveURL constructs the clone URL for a repo.

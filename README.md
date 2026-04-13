@@ -6,7 +6,7 @@ At a glance:
 
 - `manifest.yml` declares which repos exist, where they clone, and how they are grouped
 - `ws setup` clones missing repos into the configured `root`
-- `ws context` regenerates a VS Code workspace and a scoped `.scope/` tree
+- `ws context` regenerates a VS Code workspace and configured scope symlink trees
 - `ws <command...>` fans shell commands out across the selected repos
 
 The recommended model is simple:
@@ -16,7 +16,7 @@ The recommended model is simple:
 - clone and operate on the managed repos from there
 - use filters and context to scope editor state, operations, and agent-visible paths
 
-`ws` reads `manifest.yml`, clones missing repos, fans commands out across repos, generates a VS Code workspace, and maintains a scoped `.scope/` tree for filesystem-based agents.
+`ws` reads `manifest.yml`, clones missing repos, fans commands out across repos, generates a VS Code workspace, and maintains configured scope symlink trees for filesystem-based agents. By default that is a single `.scope/` tree.
 
 ## Install
 
@@ -75,7 +75,7 @@ code/
 │   ├── manifest.yml
 │   ├── manifest.local.yml      # optional, ignored
 │   ├── .ws-context             # generated, ignored
-│   ├── .scope/                 # generated symlinks, ignored
+│   ├── .scope/                 # generated symlinks, ignored (default)
 │   └── ws.code-workspace       # generated, ignored
 ├── api-server/
 ├── auth-service/
@@ -83,7 +83,7 @@ code/
 ```
 
 `root` is required in `manifest.yml`; there is no implicit default.
-The recommended layout is `root: ..`, which keeps the workspace repo separate from the managed repos while still letting `.scope/` act as the agent-facing tree.
+The recommended layout is `root: ..`, which keeps the workspace repo separate from the managed repos while still letting `.scope/` act as the default agent-facing tree.
 If you prefer a self-contained tree, use `root: repos` instead.
 
 A typical `.gitignore` for the recommended sibling-checkout layout:
@@ -94,6 +94,8 @@ A typical `.gitignore` for the recommended sibling-checkout layout:
 *.code-workspace
 manifest.local.yml
 ```
+
+If you customize `scopes:`, add those generated directories too.
 
 If you use `root: repos`, add `repos/` too.
 
@@ -156,6 +158,9 @@ remotes:
 
 branch: main
 workspace: ws.code-workspace
+scopes:
+  - dir: .scope
+    source: context
 
 groups:
   backend: [api-server, auth-service, worker]
@@ -312,10 +317,36 @@ Use groups for named subsets. The default `all` filter includes every active rep
 
 1. stores the raw filter plus resolved default scope in `.ws-context`
 2. regenerates the VS Code workspace file for that filter
-3. rebuilds `.scope/` with symlinks to only the repos in scope
+3. rebuilds the configured scope symlink directories (default: `.scope/`)
 
 For `ws context all`, `ws context none`, and `ws context reset`, the generated scope only includes repos that are already cloned on disk.
 `ws context refresh` reruns that resolution against the saved raw filter, which is useful after local activity changes or when linked worktrees were added or removed.
+
+Configure scope directories with `scopes:` in `manifest.yml` or `manifest.local.yml`.
+The default is:
+
+```yaml
+scopes:
+  - dir: .scope
+    source: context
+```
+
+Available `source` values:
+
+- `context`: the repos in the current `ws context`
+- `all`: all cloned repos on disk, independent of the current context
+
+Example:
+
+```yaml
+scopes:
+  - dir: .scope
+    source: context
+  - dir: .all-repos
+    source: all
+```
+
+Set `scopes: []` to disable generated scope directories entirely.
 
 That makes the workspace repo useful as an agent entry point:
 
@@ -328,7 +359,7 @@ That makes the workspace repo useful as an agent entry point:
 - run `ws context refresh` when a dynamic filter or worktree-aware context needs to be re-resolved
 - run `ws context save focus` when you want to snapshot the current scope into `manifest.yml`
 - run `ws context save --local scratch` when the saved group should live only in `manifest.local.yml`
-- use the workspace repo as the control plane and `.scope/` as the narrowed filesystem view for agents
+- use the workspace repo as the control plane and `.scope/` or another configured scope dir as the narrowed filesystem view for agents
 - keep the shared manifest committed while local context stays in ignored files
 
 Recommended operator and agent loop:
@@ -338,7 +369,7 @@ Recommended operator and agent loop:
    To narrow the current scope, use `ws context remove <filter>`.
    To re-resolve the saved filter after activity or worktree changes, use `ws context refresh`.
 2. Verify the scope with `ws ll` or `ws list`.
-3. Start the agent from `.scope/` when you want filesystem visibility to match that context.
+3. Start the agent from `.scope/` or another configured scope dir when you want filesystem visibility to match that context.
 4. Return to the workspace root when you need to change scope or edit `manifest.yml`.
 
 Example:
@@ -390,6 +421,7 @@ Field summary:
 - `branch`: default branch for repos that do not override it
 - `root`: required; where repos live, relative to the manifest directory or absolute
 - `workspace`: filename for the generated VS Code workspace
+- `scopes`: generated symlink directories for scoped repo views
 - `worktrees`: default worktree mode for supported commands
 - `groups`: named repo sets used for filters
 - `repos`: active repos and per-repo overrides
@@ -402,6 +434,12 @@ Start from the full reference file at [manifest.reference.yml](manifest.referenc
 Use `manifest.local.yml` for personal changes you do not want to commit.
 
 ```yaml
+scopes:
+  - dir: .scope
+    source: context
+  - dir: .all-repos
+    source: all
+
 worktrees: true
 
 remotes:
@@ -423,7 +461,7 @@ Merge rules:
 - `repos`: union, local wins on name conflict
 - `exclude`: additive
 - `groups`: local replaces same-name groups, adds new ones
-- `root`, `workspace`, and `worktrees`: local overrides when set
+- `root`, `workspace`, `scopes`, and `worktrees`: local overrides when set
 
 `ws context save <group>` writes the current context into `manifest.yml`.
 Use `ws context save --local <group>` when the saved group should live only in `manifest.local.yml`.

@@ -51,6 +51,57 @@ func TestParse(t *testing.T) {
 	assert.Len(t, m.Repos, 7)
 	assert.Len(t, m.Exclude, 2)
 	assert.False(t, m.Worktrees)
+	require.Len(t, m.Scopes, 1)
+	assert.Equal(t, ScopeDirConfig{Dir: DefaultScopeDir, Source: ScopeSourceContext}, m.Scopes[0])
+}
+
+func TestParse_CustomScopes(t *testing.T) {
+	m, err := Parse([]byte(`
+root: ..
+remotes:
+  default: git@example.com
+scopes:
+  - dir: .scope
+    source: context
+  - dir: .all
+    source: all
+repos:
+  repo-a:
+`))
+	require.NoError(t, err)
+	assert.Equal(t, []ScopeDirConfig{
+		{Dir: ".scope", Source: ScopeSourceContext},
+		{Dir: ".all", Source: ScopeSourceAll},
+	}, m.Scopes)
+}
+
+func TestParse_RejectsInvalidScopeDir(t *testing.T) {
+	_, err := Parse([]byte(`
+root: ..
+remotes:
+  default: git@example.com
+scopes:
+  - dir: ../outside
+repos:
+  repo-a:
+`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dir must stay within the workspace")
+}
+
+func TestParse_RejectsInvalidScopeSource(t *testing.T) {
+	_, err := Parse([]byte(`
+root: ..
+remotes:
+  default: git@example.com
+scopes:
+  - dir: .scope
+    source: weird
+repos:
+  repo-a:
+`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown source "weird"`)
 }
 
 func TestParse_BareRepoEntry(t *testing.T) {
@@ -207,6 +258,11 @@ func TestMergeLocal(t *testing.T) {
 
 	// Write local override
 	localYAML := `
+scopes:
+  - dir: .scope
+    source: context
+  - dir: .all
+    source: all
 worktrees: true
 
 remotes:
@@ -231,6 +287,10 @@ groups:
 	// Remotes merged
 	assert.Equal(t, "git@github.com:darren", m.Remotes["my-fork"])
 	assert.Equal(t, "git@github.com:acme-corp", m.Remotes["default"]) // preserved
+	assert.Equal(t, []ScopeDirConfig{
+		{Dir: ".scope", Source: ScopeSourceContext},
+		{Dir: ".all", Source: ScopeSourceAll},
+	}, m.Scopes)
 
 	// Repos merged: legacy-api un-excluded, my-experiment added
 	assert.Contains(t, m.Repos, "legacy-api")
@@ -250,6 +310,24 @@ groups:
 	// legacy-api is in both repos and exclude - repos wins, it's active
 	active := m.ActiveRepos()
 	assert.Contains(t, active, "legacy-api")
+}
+
+func TestMergeLocal_ScopesCanBeDisabled(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yml"), []byte(`
+root: ..
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.local.yml"), []byte(`
+scopes: []
+`), 0644))
+
+	m, err := LoadWithLocal(dir)
+	require.NoError(t, err)
+	assert.Empty(t, m.Scopes)
 }
 
 func TestMergeLocal_NoLocalFile(t *testing.T) {

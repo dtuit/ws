@@ -144,6 +144,79 @@ repos:
 	assert.Contains(t, output, "Resolved: repo-a, repo-b")
 }
 
+func TestSetContext_UsesConfiguredScopeDirs(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+scopes:
+  - dir: .scope
+    source: context
+  - dir: .all-repos
+    source: all
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+  repo-b:
+  repo-c:
+`)
+	require.NoError(t, err)
+
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-b"))
+
+	require.NoError(t, SetContext(m, wsHome, "repo-a", false))
+
+	assertScopeEntriesInDir(t, wsHome, ".scope", "repo-a")
+	assertScopeEntriesInDir(t, wsHome, ".all-repos", "repo-a", "repo-b")
+}
+
+func TestSetContext_CanDisableScopeDirs(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+scopes: []
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+
+	require.NoError(t, SetContext(m, wsHome, "repo-a", false))
+
+	assertNoScopeDir(t, wsHome, manifest.DefaultScopeDir)
+}
+
+func TestSetContext_CustomScopesClearLegacyDefaultScope(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+scopes:
+  - dir: .scoped
+    source: context
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	require.NoError(t, os.MkdirAll(filepath.Join(wsHome, manifest.DefaultScopeDir), 0755))
+	require.NoError(t, os.Symlink("../repos/repo-a", filepath.Join(wsHome, manifest.DefaultScopeDir, "repo-a")))
+
+	require.NoError(t, SetContext(m, wsHome, "repo-a", false))
+
+	assertScopeEntriesInDir(t, wsHome, ".scoped", "repo-a")
+	assertScopeEntriesInDir(t, wsHome, manifest.DefaultScopeDir)
+}
+
 func TestShowContext_PrintsResolvedRepos(t *testing.T) {
 	wsHome := t.TempDir()
 	m, err := parseManifestYAML(`

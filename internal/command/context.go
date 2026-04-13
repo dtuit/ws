@@ -10,10 +10,8 @@ import (
 	"github.com/dtuit/ws/internal/manifest"
 )
 
-const scopeDir = ".scope"
-
 // SetContext sets the default filter, regenerates the VS Code workspace,
-// and updates the repos/ symlink directory to match.
+// and updates the configured scope symlink directories to match.
 func SetContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) error {
 	return applyContext(m, wsHome, filter, includeWorktrees, false)
 }
@@ -51,7 +49,7 @@ func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees,
 		} else {
 			fmt.Println("Context cleared.")
 		}
-		if err := syncReposDir(wsHome, repos); err != nil {
+		if err := syncScopeDirs(m, wsHome, repos, includeWorktrees); err != nil {
 			return err
 		}
 		return writeWorkspace(m, wsHome, repos, includeWorktrees)
@@ -71,7 +69,7 @@ func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees,
 	}
 	fmt.Printf("Resolved: %s\n", formatResolvedContextRepos(repos))
 
-	if err := syncReposDir(wsHome, repos); err != nil {
+	if err := syncScopeDirs(m, wsHome, repos, includeWorktrees); err != nil {
 		return err
 	}
 	return writeWorkspace(m, wsHome, repos, includeWorktrees)
@@ -238,32 +236,67 @@ func formatResolvedContextRepos(repos []manifest.RepoInfo) string {
 	return strings.Join(names, ", ")
 }
 
-// syncReposDir creates/updates a repos/ directory with symlinks to the scoped repos.
+// syncScopeDirs creates/updates the configured symlink directories with repo views.
 // This constrains what filesystem-based agents (CLI tools, Claude Code) can see.
-func syncReposDir(wsHome string, repos []manifest.RepoInfo) error {
-	dir := filepath.Join(wsHome, scopeDir)
+func syncScopeDirs(m *manifest.Manifest, wsHome string, contextRepos []manifest.RepoInfo, includeWorktrees bool) error {
+	configuredDirs := make(map[string]bool, len(m.Scopes))
+	var allRepos []manifest.RepoInfo
+	allLoaded := false
+
+	for _, cfg := range m.Scopes {
+		configuredDirs[cfg.Dir] = true
+
+		repos := contextRepos
+		if cfg.Source == manifest.ScopeSourceAll {
+			if !allLoaded {
+				var err error
+				allRepos, err = resolveContextRepos(m, wsHome, "all", includeWorktrees)
+				if err != nil {
+					return err
+				}
+				allLoaded = true
+			}
+			repos = allRepos
+		}
+
+		if err := syncScopeDir(wsHome, cfg.Dir, repos); err != nil {
+			return err
+		}
+	}
+
+	if !configuredDirs[manifest.DefaultScopeDir] {
+		if err := clearScopeDir(wsHome, manifest.DefaultScopeDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func syncScopeDir(wsHome, dir string, repos []manifest.RepoInfo) error {
+	absDir := filepath.Join(wsHome, dir)
 
 	// Remove existing symlinks (but not non-symlink entries, for safety)
-	if entries, err := os.ReadDir(dir); err == nil {
+	if entries, err := os.ReadDir(absDir); err == nil {
 		for _, e := range entries {
-			p := filepath.Join(dir, e.Name())
+			p := filepath.Join(absDir, e.Name())
 			if e.Type()&os.ModeSymlink != 0 {
 				os.Remove(p)
 			}
 		}
 	}
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating repos dir: %w", err)
+	if err := os.MkdirAll(absDir, 0755); err != nil {
+		return fmt.Errorf("creating scope dir %s: %w", dir, err)
 	}
 
 	// Create symlinks for scoped repos
 	for _, repo := range repos {
 		target := repo.Path
-		link := filepath.Join(dir, repo.Name)
+		link := filepath.Join(absDir, repo.Name)
 
 		// Use relative path for the symlink
-		relTarget, err := filepath.Rel(dir, target)
+		relTarget, err := filepath.Rel(absDir, target)
 		if err != nil {
 			relTarget = target
 		}
@@ -273,7 +306,29 @@ func syncReposDir(wsHome string, repos []manifest.RepoInfo) error {
 		}
 	}
 
-	fmt.Printf(".scope/ updated (%d symlinks)\n", len(repos))
+	fmt.Printf("%s/ updated (%d symlinks)\n", filepath.ToSlash(dir), len(repos))
+	return nil
+}
+
+func clearScopeDir(wsHome, dir string) error {
+	absDir := filepath.Join(wsHome, dir)
+	entries, err := os.ReadDir(absDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading scope dir %s: %w", dir, err)
+	}
+
+	for _, e := range entries {
+		p := filepath.Join(absDir, e.Name())
+		if e.Type()&os.ModeSymlink != 0 {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("clearing scope dir %s: %w", dir, err)
+			}
+		}
+	}
+
 	return nil
 }
 

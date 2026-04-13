@@ -91,7 +91,13 @@ func commitEmptyAt(t *testing.T, repoPath, message, name, email string, when tim
 func assertScopeEntries(t *testing.T, wsHome string, want ...string) {
 	t.Helper()
 
-	entries, err := os.ReadDir(filepath.Join(wsHome, scopeDir))
+	assertScopeEntriesInDir(t, wsHome, manifest.DefaultScopeDir, want...)
+}
+
+func assertScopeEntriesInDir(t *testing.T, wsHome, dir string, want ...string) {
+	t.Helper()
+
+	entries, err := os.ReadDir(filepath.Join(wsHome, dir))
 	require.NoError(t, err)
 
 	var got []string
@@ -99,6 +105,13 @@ func assertScopeEntries(t *testing.T, wsHome string, want ...string) {
 		got = append(got, entry.Name())
 	}
 	assert.Equal(t, want, got)
+}
+
+func assertNoScopeDir(t *testing.T, wsHome, dir string) {
+	t.Helper()
+
+	_, err := os.Stat(filepath.Join(wsHome, dir))
+	assert.True(t, os.IsNotExist(err), "expected %s to be absent", dir)
 }
 
 func assertWorkspaceFolders(t *testing.T, workspacePath string, want ...string) {

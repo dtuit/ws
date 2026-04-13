@@ -53,6 +53,44 @@ root: ..
 workspace: ws.code-workspace
 
 # ---------------------------------------------------------------------------
+# scopes
+# ---------------------------------------------------------------------------
+# Generated symlink directories for repo views used by agents and other
+# filesystem-based tooling.
+#
+# Default:
+#   scopes:
+#     - dir: .scope
+#       source: context
+#
+# Each entry has:
+#   dir: workspace-relative directory to generate
+#   source: which repo set to expose
+#
+# Supported sources:
+#   context  the repos in the current ws context
+#   all      all cloned repos on disk, regardless of current context
+#
+# Examples:
+#   scopes:
+#     - dir: .scope
+#       source: context
+#     - dir: .all-repos
+#       source: all
+#
+# Disable generated scope dirs entirely:
+#   scopes: []
+#
+# Recommendation:
+#   Keep the shared manifest on the default `.scope` unless the whole team wants
+#   a different agent-facing directory name. Personal extra views like
+#   `.all-repos` fit well in manifest.local.yml.
+
+scopes:
+  - dir: .scope
+    source: context
+
+# ---------------------------------------------------------------------------
 # worktrees
 # ---------------------------------------------------------------------------
 # Default worktree mode for supported commands.
@@ -166,9 +204,16 @@ exclude:
 #   groups:   local replaces same-name groups, new groups added
 #   root:     local overrides if set
 #   workspace: local overrides if set
+#   scopes:   local replaces the full list if set
 #   worktrees: local overrides if set
 #
 # Example manifest.local.yml:
+#
+#   scopes:
+#     - dir: .scope
+#       source: context
+#     - dir: .all-repos
+#       source: all
 #
 #   worktrees: true
 #
