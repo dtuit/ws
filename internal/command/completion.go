@@ -211,7 +211,7 @@ func completeContextCommand(m *manifest.Manifest, args []string, current int) Co
 
 	if len(nonFlags) == 0 {
 		values := append(flags, filterSuggestions(m)...)
-		values = append(values, "none", "reset", "add", "remove", "save", "refresh", "-", "prev")
+		values = append(values, "none", "reset", "add", "remove", "save", "refresh", ".", "-", "prev")
 		return finalizeCompletion(values, currentWord, false)
 	}
 
@@ -227,7 +227,7 @@ func completeContextCommand(m *manifest.Manifest, args []string, current int) Co
 		values := append(flags, filterSuggestions(m)...)
 		return finalizeCompletion(values, currentWord, false)
 	}
-	if nonFlags[0] == "refresh" {
+	if nonFlags[0] == "refresh" || nonFlags[0] == "." {
 		return finalizeCompletion(flags, currentWord, false)
 	}
 
