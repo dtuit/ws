@@ -241,6 +241,7 @@ ws ctx [filter]           Alias for ws context
 ws open                   Open the generated VS Code workspace
 ws context refresh
                           Re-resolve the stored context
+ws context -              Swap to the previous context (like cd -)
 ws context add <filter>
                           Extend the current context
 ws context remove <filter>
@@ -326,6 +327,7 @@ That makes the workspace repo useful as an agent entry point:
 - run `ws context add active:1d` when you want to union the current scope with very recent local activity
 - run `ws context remove repo-x` when you want to narrow the current scope without rebuilding it from scratch
 - run `ws context refresh` when a dynamic filter or worktree-aware context needs to be re-resolved
+- run `ws context -` (or `ws context prev`) to swap back to the previous context, like `cd -`
 - run `ws context save focus` when you want to snapshot the current scope into `manifest.yml`
 - run `ws context save --local scratch` when the saved group should live only in `manifest.local.yml`
 - use the workspace repo as the control plane and `.scope/` as the narrowed filesystem view for agents

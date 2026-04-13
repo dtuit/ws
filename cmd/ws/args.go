@@ -143,7 +143,7 @@ func parseContextArgs(args []string) (contextArgs, error) {
 			parsed.Local = true
 			continue
 		}
-		if strings.HasPrefix(arg, "-") {
+		if arg != "-" && strings.HasPrefix(arg, "-") {
 			return contextArgs{}, fmt.Errorf("unknown context flag: %s", arg)
 		}
 		tokens = append(tokens, arg)
@@ -162,6 +162,15 @@ func parseContextArgs(args []string) (contextArgs, error) {
 	case "set", "add", "remove", "save", "refresh":
 		action = tokens[0]
 		tokens = tokens[1:]
+	case "-", "prev", "previous":
+		if len(tokens) != 1 {
+			return contextArgs{}, fmt.Errorf("%q cannot be combined with other tokens", tokens[0])
+		}
+		if parsed.Local {
+			return contextArgs{}, fmt.Errorf("--local is only valid with ws context save")
+		}
+		parsed.Action = "swap"
+		return parsed, nil
 	}
 	parsed.Action = action
 

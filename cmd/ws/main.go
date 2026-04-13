@@ -98,6 +98,10 @@ dispatch:
 			if err := command.RefreshContext(m, wsHome, includeWorktrees); err != nil {
 				fatal(err)
 			}
+		case "swap":
+			if err := command.SwapContext(m, wsHome, includeWorktrees); err != nil {
+				fatal(err)
+			}
 		case "add":
 			if err := command.AddContext(m, wsHome, parsed.Filter, includeWorktrees); err != nil {
 				fatal(err)

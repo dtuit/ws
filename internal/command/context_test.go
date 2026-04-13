@@ -160,7 +160,7 @@ repos:
 	require.NoError(t, writeContextState(filepath.Join(wsHome, contextFile), "repo-a,repo-b", []manifest.RepoInfo{
 		{Name: "repo-a"},
 		{Name: "repo-b"},
-	}))
+	}, nil))
 
 	output := captureCommandStdout(t, func() {
 		ShowContext(m, wsHome)
@@ -773,4 +773,114 @@ resolved:
 	filter, ok = GetDefaultContextForMode(m, wsHome, false)
 	require.True(t, ok)
 	assert.Equal(t, "repo,other", filter)
+}
+
+func TestSwapContext_RestoresPreviousRaw(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+groups:
+  backend: [repo-a]
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-b"))
+
+	require.NoError(t, SetContext(m, wsHome, "backend", false))
+	require.NoError(t, SetContext(m, wsHome, "all", false))
+
+	require.NoError(t, SwapContext(m, wsHome, false))
+
+	state := readStoredContext(t, wsHome)
+	assert.Equal(t, "backend", state.Raw)
+	require.NotNil(t, state.Previous)
+	assert.Equal(t, "all", *state.Previous)
+	assertScopeEntries(t, wsHome, "repo-a")
+}
+
+func TestSwapContext_NoPreviousAfterFirstSetErrors(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+
+	require.NoError(t, SetContext(m, wsHome, "all", false))
+
+	err = SwapContext(m, wsHome, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no previous context")
+}
+
+func TestRefreshContext_PreservesPrevious(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+groups:
+  backend: [repo-a]
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-b"))
+
+	require.NoError(t, SetContext(m, wsHome, "backend", false))
+	require.NoError(t, SetContext(m, wsHome, "all", false))
+	require.NoError(t, RefreshContext(m, wsHome, false))
+
+	state := readStoredContext(t, wsHome)
+	assert.Equal(t, "all", state.Raw)
+	require.NotNil(t, state.Previous)
+	assert.Equal(t, "backend", *state.Previous)
+}
+
+func TestSwapContext_ClearedPreviousSwapsToCleared(t *testing.T) {
+	wsHome := t.TempDir()
+	m, err := parseManifestYAML(`
+root: repos
+workspace: ws.code-workspace
+remotes:
+  default: git@example.com
+groups:
+  backend: [repo-a]
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-a"))
+	initCheckout(t, filepath.Join(wsHome, "repos", "repo-b"))
+
+	// Start cleared, then set a real context; previous should be "".
+	require.NoError(t, SetContext(m, wsHome, "none", false))
+	require.NoError(t, SetContext(m, wsHome, "backend", false))
+
+	state := readStoredContext(t, wsHome)
+	require.NotNil(t, state.Previous)
+	assert.Equal(t, "", *state.Previous)
+
+	// Swap back to cleared.
+	require.NoError(t, SwapContext(m, wsHome, false))
+
+	state = readStoredContext(t, wsHome)
+	assert.Equal(t, "", state.Raw)
+	require.NotNil(t, state.Previous)
+	assert.Equal(t, "backend", *state.Previous)
 }

@@ -16,14 +16,18 @@ const legacyResolvedContextFile = ".ws-context.resolved"
 type contextState struct {
 	Raw      string   `yaml:"raw"`
 	Resolved []string `yaml:"resolved"`
+	// Previous holds the prior raw filter for `ws context -` swap.
+	// A nil pointer means "no previous recorded"; a pointer to "" means
+	// the prior context was explicitly cleared (swap-to-cleared is valid).
+	Previous *string `yaml:"previous,omitempty"`
 }
 
 func loadStoredContextState(wsHome string) (contextState, bool, error) {
 	return readContextState(contextStatePath(wsHome))
 }
 
-func saveStoredContextState(wsHome, raw string, repos []manifest.RepoInfo) error {
-	return writeContextState(contextStatePath(wsHome), raw, repos)
+func saveStoredContextState(wsHome, raw string, repos []manifest.RepoInfo, previous *string) error {
+	return writeContextState(contextStatePath(wsHome), raw, repos, previous)
 }
 
 func contextStatePath(wsHome string) string {
@@ -46,10 +50,11 @@ func readContextState(path string) (contextState, bool, error) {
 	return state, true, nil
 }
 
-func writeContextState(path, raw string, repos []manifest.RepoInfo) error {
+func writeContextState(path, raw string, repos []manifest.RepoInfo, previous *string) error {
 	state := contextState{
 		Raw:      raw,
 		Resolved: resolvedContextNames(repos),
+		Previous: previous,
 	}
 	data, err := yaml.Marshal(&state)
 	if err != nil {

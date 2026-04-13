@@ -15,7 +15,7 @@ const scopeDir = ".scope"
 // SetContext sets the default filter, regenerates the VS Code workspace,
 // and updates the repos/ symlink directory to match.
 func SetContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) error {
-	return applyContext(m, wsHome, filter, includeWorktrees, false)
+	return applyContext(m, wsHome, filter, includeWorktrees, applyModeSet)
 }
 
 // RefreshContext re-resolves the stored context filter and rebuilds the scope.
@@ -28,13 +28,56 @@ func RefreshContext(m *manifest.Manifest, wsHome string, includeWorktrees bool) 
 		return fmt.Errorf("no context set")
 	}
 
-	return applyContext(m, wsHome, state.Raw, includeWorktrees, true)
+	return applyContext(m, wsHome, state.Raw, includeWorktrees, applyModeRefresh)
 }
 
-func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees, refresh bool) error {
+// SwapContext swaps the current context with the previously set one,
+// analogous to `cd -`. Returns an error if no previous context is recorded.
+func SwapContext(m *manifest.Manifest, wsHome string, includeWorktrees bool) error {
+	state, ok, err := loadStoredContextState(wsHome)
+	if err != nil {
+		return err
+	}
+	if !ok || state.Previous == nil {
+		return fmt.Errorf("no previous context")
+	}
+
+	return applyContext(m, wsHome, *state.Previous, includeWorktrees, applyModeSwap)
+}
+
+type applyMode int
+
+const (
+	applyModeSet applyMode = iota
+	applyModeRefresh
+	applyModeSwap
+)
+
+func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool, mode applyMode) error {
 	filter, err := normalizeContextFilter(m, filter)
 	if err != nil {
 		return err
+	}
+
+	prevState, hasPrev, err := loadStoredContextState(wsHome)
+	if err != nil {
+		return err
+	}
+
+	// Determine what to store as `previous` on this write.
+	// - refresh: never shift; pass through the existing previous.
+	// - set/swap: shift when the raw filter actually changes; otherwise
+	//   preserve the existing previous so no-op writes don't clobber it.
+	var previous *string
+	if mode == applyModeRefresh {
+		if hasPrev {
+			previous = prevState.Previous
+		}
+	} else if hasPrev && prevState.Raw != filter {
+		prior := prevState.Raw
+		previous = &prior
+	} else if hasPrev {
+		previous = prevState.Previous
 	}
 
 	repos, err := resolveContextRepos(m, wsHome, filter, includeWorktrees)
@@ -42,13 +85,17 @@ func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees,
 		return err
 	}
 	if filter == "" || filter == "none" || filter == "reset" {
-		if err := persistContextState(wsHome, "", repos); err != nil {
+		if err := persistContextState(wsHome, "", repos, previous); err != nil {
 			return err
 		}
-		if refresh {
+		switch mode {
+		case applyModeRefresh:
 			fmt.Printf("Context refreshed (no saved filter, %d repos)\n", len(repos))
 			fmt.Printf("Resolved: %s\n", formatResolvedContextRepos(repos))
-		} else {
+		case applyModeSwap:
+			fmt.Printf("Context swapped to cleared (%d repos)\n", len(repos))
+			fmt.Printf("Resolved: %s\n", formatResolvedContextRepos(repos))
+		default:
 			fmt.Println("Context cleared.")
 		}
 		if err := syncReposDir(wsHome, repos); err != nil {
@@ -61,12 +108,15 @@ func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees,
 		return fmt.Errorf("filter %q matched no repos", filter)
 	}
 
-	if err := persistContextState(wsHome, filter, repos); err != nil {
+	if err := persistContextState(wsHome, filter, repos, previous); err != nil {
 		return err
 	}
-	if refresh {
+	switch mode {
+	case applyModeRefresh:
 		fmt.Printf("Context refreshed from %q (%d repos)\n", filter, len(repos))
-	} else {
+	case applyModeSwap:
+		fmt.Printf("Context swapped to %q (%d repos)\n", filter, len(repos))
+	default:
 		fmt.Printf("Context set to %q (%d repos)\n", filter, len(repos))
 	}
 	fmt.Printf("Resolved: %s\n", formatResolvedContextRepos(repos))
@@ -277,8 +327,8 @@ func syncReposDir(wsHome string, repos []manifest.RepoInfo) error {
 	return nil
 }
 
-func persistContextState(wsHome, raw string, repos []manifest.RepoInfo) error {
-	if err := saveStoredContextState(wsHome, raw, repos); err != nil {
+func persistContextState(wsHome, raw string, repos []manifest.RepoInfo, previous *string) error {
+	if err := saveStoredContextState(wsHome, raw, repos, previous); err != nil {
 		return err
 	}
 	removeLegacyResolvedContext(wsHome)

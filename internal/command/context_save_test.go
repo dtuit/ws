@@ -29,7 +29,7 @@ repos:
 	require.NoError(t, writeContextState(filepath.Join(wsHome, contextFile), "repo-a,repo-b", []manifest.RepoInfo{
 		{Name: "repo-a"},
 		{Name: "repo-b"},
-	}))
+	}, nil))
 
 	require.NoError(t, SaveContextGroup(m, wsHome, "focus", false))
 
@@ -55,7 +55,7 @@ repos:
 	require.NoError(t, writeContextState(filepath.Join(wsHome, contextFile), "repo-a,repo-b", []manifest.RepoInfo{
 		{Name: "repo-a"},
 		{Name: "repo-b"},
-	}))
+	}, nil))
 
 	require.NoError(t, SaveContextGroup(m, wsHome, "focus", true))
 
@@ -87,7 +87,7 @@ repos:
 	require.NoError(t, writeContextState(filepath.Join(wsHome, contextFile), "repo-a,repo-b", []manifest.RepoInfo{
 		{Name: "repo-a"},
 		{Name: "repo-b"},
-	}))
+	}, nil))
 
 	require.NoError(t, SaveContextGroup(m, wsHome, "focus", false))
 
@@ -126,7 +126,7 @@ repos:
 	require.NoError(t, writeContextState(filepath.Join(wsHome, contextFile), "repo@repo-feature,repo", []manifest.RepoInfo{
 		{Name: "repo@repo-feature", Worktree: "repo-feature"},
 		{Name: "repo"},
-	}))
+	}, nil))
 
 	require.NoError(t, SaveContextGroup(m, wsHome, "focus", false))
 
@@ -149,7 +149,7 @@ repos:
 `)
 	require.NoError(t, writeContextState(filepath.Join(wsHome, contextFile), "local-repo", []manifest.RepoInfo{
 		{Name: "local-repo"},
-	}))
+	}, nil))
 
 	err := SaveContextGroup(m, wsHome, "focus", false)
 	require.Error(t, err)
