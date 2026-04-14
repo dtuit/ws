@@ -12,6 +12,7 @@ const (
 	CommandFetch   = "fetch"
 	CommandPull    = "pull"
 	CommandContext = "context"
+	CommandMux     = "mux"
 )
 
 type builtinCommandAlias struct {
@@ -125,6 +126,16 @@ var builtinCommands = []BuiltinCommand{
 			{Usage: "context save [--local] <group>", Description: "Persist the current context as a named group"},
 		},
 		complete: completeContextCommand,
+	},
+	{
+		Name:        CommandMux,
+		ShowInUsage: true,
+		Help: []HelpEntry{
+			{Usage: "mux", Description: "Attach or create a persistent terminal session (tmux/zellij)"},
+			{Usage: "mux kill", Description: "Kill the workspace session"},
+			{Usage: "mux ls", Description: "List multiplexer sessions"},
+		},
+		complete: completeMuxCommand,
 	},
 }
 

@@ -193,6 +193,24 @@ func parseContextArgs(args []string) (contextArgs, error) {
 	return parsed, nil
 }
 
+type muxArgs struct {
+	Action string // "attach", "kill", "ls"
+}
+
+func parseMuxArgs(args []string) (muxArgs, error) {
+	if len(args) == 0 {
+		return muxArgs{Action: "attach"}, nil
+	}
+	switch args[0] {
+	case "kill":
+		return muxArgs{Action: "kill"}, nil
+	case "ls", "list":
+		return muxArgs{Action: "ls"}, nil
+	default:
+		return muxArgs{}, fmt.Errorf("unknown mux subcommand: %s", args[0])
+	}
+}
+
 func isWorktreesOverrideToken(token string) bool {
 	_, ok := command.ParseWorktreesFlag(token)
 	return ok

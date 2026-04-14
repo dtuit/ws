@@ -235,6 +235,13 @@ func completeContextCommand(m *manifest.Manifest, args []string, current int) Co
 	return finalizeCompletion(values, currentWord, false)
 }
 
+func completeMuxCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
+	if current == 0 {
+		return finalizeCompletion([]string{"kill", "ls"}, completionWord(args, current), false)
+	}
+	return CompletionResult{}
+}
+
 func completePassthrough(m *manifest.Manifest, args []string, current int) CompletionResult {
 	if current < 0 {
 		return CompletionResult{}

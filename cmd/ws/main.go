@@ -224,6 +224,26 @@ dispatch:
 			fatal(err)
 		}
 
+	case command.CommandMux:
+		parsed, err := parseMuxArgs(args)
+		if err != nil {
+			fatal(err)
+		}
+		switch parsed.Action {
+		case "attach":
+			if err := command.MuxAttachOrCreate(m, wsHome); err != nil {
+				fatal(err)
+			}
+		case "kill":
+			if err := command.MuxKill(m, wsHome); err != nil {
+				fatal(err)
+			}
+		case "ls":
+			if err := command.MuxList(m, wsHome); err != nil {
+				fatal(err)
+			}
+		}
+
 	case "--":
 		// Explicit escape: "ws -- [filter] <command...>"
 		filter, cmdArgs, localWorktrees := command.ParseSuperArgs(m, args)
