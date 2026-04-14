@@ -162,6 +162,9 @@ func parseContextArgs(args []string) (contextArgs, error) {
 	case "set", "add", "remove", "save", "refresh":
 		action = tokens[0]
 		tokens = tokens[1:]
+	case ".":
+		action = "refresh"
+		tokens = tokens[1:]
 	case "-", "prev", "previous":
 		if len(tokens) != 1 {
 			return contextArgs{}, fmt.Errorf("%q cannot be combined with other tokens", tokens[0])
