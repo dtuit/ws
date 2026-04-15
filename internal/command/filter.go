@@ -162,6 +162,30 @@ func resolveFilterRepos(m *manifest.Manifest, wsHome, filter string, strict bool
 			continue
 		}
 
+		// @branch — select all worktrees across repos matching a branch name
+		if strings.HasPrefix(token, "@") {
+			branch := token[1:]
+			if branch == "" {
+				err := fmt.Errorf("@ requires a branch name (e.g., @feature-a)")
+				if strict {
+					return nil, err
+				}
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				continue
+			}
+			matched, err := resolveWorktreeBranch(m, wsHome, branch)
+			if err != nil {
+				if strict {
+					return nil, err
+				}
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+			}
+			for _, repo := range matched {
+				add(repo)
+			}
+			continue
+		}
+
 		err := fmt.Errorf("%q is not a known group, repo, or worktree target", token)
 		if strict {
 			return nil, err
@@ -307,6 +331,41 @@ func baseRepoInfo(m *manifest.Manifest, wsHome, name string, cfg manifest.RepoCo
 		Groups: groups,
 		Path:   m.ResolvePath(wsHome, name, cfg),
 	}
+}
+
+// resolveWorktreeBranch finds all worktrees across active repos that are on
+// the given branch. Returns one RepoInfo per matching worktree.
+func resolveWorktreeBranch(m *manifest.Manifest, wsHome, branch string) ([]manifest.RepoInfo, error) {
+	allRepos := m.AllRepos(wsHome)
+	if len(allRepos) == 0 {
+		return nil, nil
+	}
+
+	sets := git.DiscoverWorktreesAll(allRepos, git.Workers(len(allRepos)))
+	var matched []manifest.RepoInfo
+
+	for _, set := range sets {
+		if set.Err != nil || len(set.Worktrees) == 0 {
+			continue
+		}
+		for _, target := range worktreeTargets(set.Repo, set.Worktrees) {
+			if target.Primary {
+				continue
+			}
+			if target.Branch == branch {
+				matched = append(matched, manifest.RepoInfo{
+					Name:     target.Name,
+					URL:      set.Repo.URL,
+					Branch:   target.Branch,
+					Groups:   set.Repo.Groups,
+					Path:     target.Path,
+					Worktree: worktreeDisplayName(set.Repo.Name, target.Name),
+				})
+			}
+		}
+	}
+
+	return matched, nil
 }
 
 func expandSelectedReposToWorktrees(repos []manifest.RepoInfo) []manifest.RepoInfo {

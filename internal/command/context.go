@@ -428,6 +428,10 @@ func normalizeContextFilter(m *manifest.Manifest, filter string) (string, error)
 			}
 			if _, ok := m.Groups[token]; !ok {
 				if _, ok := active[token]; !ok {
+					// @branch — matches all worktrees on a branch
+					if strings.HasPrefix(token, "@") && len(token) > 1 {
+						break
+					}
 					repoName, selector, worktreeTarget := splitWorktreeToken(token, active)
 					if !worktreeTarget || repoName == "" || selector == "" {
 						invalid = append(invalid, token)
