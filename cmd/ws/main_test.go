@@ -298,6 +298,32 @@ repos:
 	assert.Equal(t, "", selector)
 }
 
+func TestParseMuxArgs_DupNoArgs(t *testing.T) {
+	parsed, err := parseMuxArgs([]string{"dup"})
+	require.NoError(t, err)
+	assert.Equal(t, "dup", parsed.Action)
+	assert.Empty(t, parsed.WindowName)
+}
+
+func TestParseMuxArgs_DupWithWindow(t *testing.T) {
+	parsed, err := parseMuxArgs([]string{"dup", "editor"})
+	require.NoError(t, err)
+	assert.Equal(t, "dup", parsed.Action)
+	assert.Equal(t, "editor", parsed.WindowName)
+}
+
+func TestParseMuxArgs_DuplicateAlias(t *testing.T) {
+	parsed, err := parseMuxArgs([]string{"duplicate", "shell"})
+	require.NoError(t, err)
+	assert.Equal(t, "dup", parsed.Action)
+	assert.Equal(t, "shell", parsed.WindowName)
+}
+
+func TestParseMuxArgs_DupTooManyArgs(t *testing.T) {
+	_, err := parseMuxArgs([]string{"dup", "editor", "extra"})
+	require.Error(t, err)
+}
+
 func activeRepoConfigs(t *testing.T, yaml string) map[string]manifest.RepoConfig {
 	t.Helper()
 

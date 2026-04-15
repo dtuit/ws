@@ -67,6 +67,71 @@ func (z *zellijMux) CreateAndAttach(name string, wsHome string, opts MuxCreateOp
 	return cmd.Run()
 }
 
+func (z *zellijMux) ActiveSession() (string, error) {
+	name := os.Getenv("ZELLIJ_SESSION_NAME")
+	if name == "" {
+		return "", fmt.Errorf("not inside a zellij session")
+	}
+	return name, nil
+}
+
+func (z *zellijMux) ActiveWindow(session string) (string, error) {
+	cmd := exec.Command(z.bin, "action", "list-panes", "--json", "--tab", "--geometry")
+	cmd.Env = append(os.Environ(), "ZELLIJ_SESSION_NAME="+session)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("list-panes: %w", err)
+	}
+
+	var panes []zellijPane
+	if err := json.Unmarshal(out, &panes); err != nil {
+		return "", fmt.Errorf("parsing list-panes: %w", err)
+	}
+
+	for _, p := range panes {
+		if p.IsFocused {
+			return p.TabName, nil
+		}
+	}
+	return "", fmt.Errorf("could not determine active tab; specify the window name explicitly")
+}
+
+func (z *zellijMux) AddWindow(session string, win MuxWindowSpec) error {
+	env := append(os.Environ(), "ZELLIJ_SESSION_NAME="+session)
+
+	// Create the new tab with the first pane's directory.
+	newTabArgs := []string{"action", "new-tab", "--name", win.Name}
+	if len(win.Panes) > 0 && win.Panes[0].Dir != "" {
+		newTabArgs = append(newTabArgs, "--cwd", win.Panes[0].Dir)
+	}
+	cmd := exec.Command(z.bin, newTabArgs...)
+	cmd.Env = env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("new-tab: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// Split for additional panes.
+	if len(win.Panes) > 1 {
+		direction := "down"
+		if win.Layout == "even-horizontal" || win.Layout == "tiled" {
+			direction = "right"
+		}
+		for _, pane := range win.Panes[1:] {
+			splitArgs := []string{"action", "new-pane", "--direction", direction}
+			if pane.Dir != "" {
+				splitArgs = append(splitArgs, "--cwd", pane.Dir)
+			}
+			cmd := exec.Command(z.bin, splitArgs...)
+			cmd.Env = env
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("new-pane: %s: %w", strings.TrimSpace(string(out)), err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (z *zellijMux) Attach(name string) error {
 	if z.IsInside() {
 		return fmt.Errorf("already inside a zellij session; detach first or use a separate terminal")
@@ -158,6 +223,7 @@ func (z *zellijMux) ListWindows(session string) ([]MuxWindowSpec, error) {
 
 // zellijPane is the JSON structure returned by zellij action list-panes --json --tab --geometry.
 type zellijPane struct {
+	IsFocused   bool   `json:"is_focused"`
 	IsPlugin    bool   `json:"is_plugin"`
 	TabID       int    `json:"tab_id"`
 	TabPosition int    `json:"tab_position"`

@@ -23,6 +23,12 @@ type Mux interface {
 	List(highlight string) error
 	// ListWindows returns the current window/pane layout of an existing session.
 	ListWindows(session string) ([]MuxWindowSpec, error)
+	// AddWindow creates a new window in an existing session.
+	AddWindow(session string, win MuxWindowSpec) error
+	// ActiveSession returns the session name the current process is inside.
+	ActiveSession() (string, error)
+	// ActiveWindow returns the name of the focused window/tab in the given session.
+	ActiveWindow(session string) (string, error)
 	// IsInside reports whether the current process is inside this multiplexer.
 	IsInside() bool
 	// Name returns the backend name ("tmux" or "zellij").
@@ -111,6 +117,72 @@ func MuxKill(m *manifest.Manifest, wsHome, sessionName string) error {
 	}
 	fmt.Printf("Killed %s session %q\n", mux.Name(), session)
 	return nil
+}
+
+// MuxDup duplicates a window/tab in the current active session.
+// If windowName is empty, the currently focused window is duplicated.
+func MuxDup(m *manifest.Manifest, wsHome, windowName string) error {
+	mux, err := resolveMuxBackend(m)
+	if err != nil {
+		return err
+	}
+
+	session, err := mux.ActiveSession()
+	if err != nil {
+		return err
+	}
+
+	if windowName == "" {
+		windowName, err = mux.ActiveWindow(session)
+		if err != nil {
+			return err
+		}
+	}
+
+	windows, err := mux.ListWindows(session)
+	if err != nil {
+		return err
+	}
+
+	var target *MuxWindowSpec
+	for i := range windows {
+		if windows[i].Name == windowName {
+			target = &windows[i]
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("window %q not found in session %q", windowName, session)
+	}
+
+	newName := nextWindowName(windowName, windows)
+	dup := MuxWindowSpec{
+		Name:   newName,
+		Panes:  make([]MuxPaneSpec, len(target.Panes)),
+		Layout: target.Layout,
+	}
+	copy(dup.Panes, target.Panes)
+
+	if err := mux.AddWindow(session, dup); err != nil {
+		return err
+	}
+
+	fmt.Printf("Duplicated %s window %q as %q\n", mux.Name(), windowName, newName)
+	return nil
+}
+
+// nextWindowName returns a unique name by appending a numeric suffix.
+func nextWindowName(base string, existing []MuxWindowSpec) string {
+	names := make(map[string]bool, len(existing))
+	for _, w := range existing {
+		names[w.Name] = true
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
+		if !names[candidate] {
+			return candidate
+		}
+	}
 }
 
 // MuxList lists multiplexer sessions.

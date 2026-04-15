@@ -187,6 +187,49 @@ func (t *tmuxMux) resizePanes(session string, win MuxWindowSpec) error {
 	return nil
 }
 
+func (t *tmuxMux) ActiveSession() (string, error) {
+	if !t.IsInside() {
+		return "", fmt.Errorf("not inside a tmux session")
+	}
+	out, err := exec.Command(t.bin, "display-message", "-p", "#S").Output()
+	if err != nil {
+		return "", fmt.Errorf("display-message: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (t *tmuxMux) ActiveWindow(session string) (string, error) {
+	out, err := exec.Command(t.bin, "display-message", "-t", session, "-p", "#W").Output()
+	if err != nil {
+		return "", fmt.Errorf("display-message: %w", err)
+	}
+	name := strings.TrimSpace(string(out))
+	if name == "" {
+		return "", fmt.Errorf("could not determine active window")
+	}
+	return name, nil
+}
+
+func (t *tmuxMux) AddWindow(session string, win MuxWindowSpec) error {
+	winDir := ""
+	if len(win.Panes) > 0 {
+		winDir = win.Panes[0].Dir
+	}
+
+	args := []string{"new-window", "-t", session, "-n", win.Name}
+	if winDir != "" {
+		args = append(args, "-c", winDir)
+	}
+	if out, err := exec.Command(t.bin, args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("new-window %q: %s: %w", win.Name, strings.TrimSpace(string(out)), err)
+	}
+
+	if err := t.addPanes(session, win); err != nil {
+		return err
+	}
+	return t.resizePanes(session, win)
+}
+
 func (t *tmuxMux) Attach(name string) error {
 	if t.IsInside() {
 		cmd := exec.Command(t.bin, "switch-client", "-t", name)
