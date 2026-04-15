@@ -251,6 +251,30 @@ dispatch:
 			if err := command.MuxSave(m, wsHome, parsed.SessionName, parsed.Local); err != nil {
 				fatal(err)
 			}
+		case "dup":
+			if err := command.MuxDup(m, wsHome, parsed.WindowName); err != nil {
+				fatal(err)
+			}
+		}
+
+	case command.CommandWorktree:
+		parsed, err := parseWorktreeArgs(args)
+		if err != nil {
+			fatal(err)
+		}
+		switch parsed.Action {
+		case "add":
+			if err := command.WorktreeAdd(m, wsHome, parsed.Branch, parsed.Filter); err != nil {
+				fatal(err)
+			}
+		case "remove":
+			if err := command.WorktreeRemove(m, wsHome, parsed.Branch, parsed.Filter); err != nil {
+				fatal(err)
+			}
+		case "list":
+			if err := command.WorktreeListCmd(m, wsHome, parsed.Filter); err != nil {
+				fatal(err)
+			}
 		}
 
 	case "--":

@@ -220,8 +220,9 @@ func parseEditorFlag(args []string) (string, []string) {
 }
 
 type muxArgs struct {
-	Action      string // "attach", "kill", "ls", "save"
+	Action      string // "attach", "kill", "ls", "save", "dup"
 	SessionName string // named session config (empty = default)
+	WindowName  string // for "dup": window to duplicate (empty = active window)
 	Local       bool   // save to manifest.local.yml instead of manifest.yml
 }
 
@@ -241,6 +242,15 @@ func parseMuxArgs(args []string) (muxArgs, error) {
 		return parsed, nil
 	case "ls", "list":
 		return muxArgs{Action: "ls"}, nil
+	case "dup", "duplicate":
+		if len(args) > 2 {
+			return muxArgs{}, fmt.Errorf("usage: ws mux dup [window]")
+		}
+		parsed := muxArgs{Action: "dup"}
+		if len(args) > 1 {
+			parsed.WindowName = args[1]
+		}
+		return parsed, nil
 	case "save":
 		parsed := muxArgs{Action: "save"}
 		for _, arg := range args[1:] {
@@ -267,6 +277,46 @@ func parseMuxArgs(args []string) (muxArgs, error) {
 			return muxArgs{}, fmt.Errorf("usage: ws mux [session]")
 		}
 		return parsed, nil
+	}
+}
+
+type worktreeArgs struct {
+	Action string // "add", "remove", "list"
+	Branch string // branch name (for add/remove)
+	Filter string // optional filter
+}
+
+func parseWorktreeArgs(args []string) (worktreeArgs, error) {
+	if len(args) == 0 {
+		return worktreeArgs{Action: "list"}, nil
+	}
+	switch args[0] {
+	case "add":
+		if len(args) < 2 {
+			return worktreeArgs{}, fmt.Errorf("usage: ws worktree add <branch> [filter]")
+		}
+		parsed := worktreeArgs{Action: "add", Branch: args[1]}
+		if len(args) > 2 {
+			parsed.Filter = strings.Join(args[2:], ",")
+		}
+		return parsed, nil
+	case "remove", "rm":
+		if len(args) < 2 {
+			return worktreeArgs{}, fmt.Errorf("usage: ws worktree remove <branch> [filter]")
+		}
+		parsed := worktreeArgs{Action: "remove", Branch: args[1]}
+		if len(args) > 2 {
+			parsed.Filter = strings.Join(args[2:], ",")
+		}
+		return parsed, nil
+	case "list", "ls":
+		parsed := worktreeArgs{Action: "list"}
+		if len(args) > 1 {
+			parsed.Filter = strings.Join(args[1:], ",")
+		}
+		return parsed, nil
+	default:
+		return worktreeArgs{}, fmt.Errorf("unknown worktree subcommand: %s", args[0])
 	}
 }
 

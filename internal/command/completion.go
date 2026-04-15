@@ -237,7 +237,20 @@ func completeContextCommand(m *manifest.Manifest, args []string, current int) Co
 
 func completeMuxCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
 	if current == 0 {
-		return finalizeCompletion([]string{"kill", "ls", "save"}, completionWord(args, current), false)
+		return finalizeCompletion([]string{"dup", "kill", "ls", "save"}, completionWord(args, current), false)
+	}
+	return CompletionResult{}
+}
+
+func completeWorktreeCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current == 0 {
+		return finalizeCompletion([]string{"add", "remove", "list", "ls"}, completionWord(args, current), false)
+	}
+	if current >= 2 && len(args) > 0 {
+		action := args[0]
+		if action == "add" || action == "remove" || action == "list" || action == "ls" {
+			return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
+		}
 	}
 	return CompletionResult{}
 }

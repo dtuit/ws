@@ -16,6 +16,7 @@ type Manifest struct {
 	Workspace     string              // VS Code workspace filename (default "ws.code-workspace")
 	Scopes        []ScopeDirConfig    // generated symlink directories for scoped repo views
 	Worktrees     bool                // default worktree expansion behavior for supported commands
+	WorktreeRoot  string              // directory for created worktrees (default ".worktrees")
 	Mux           MuxConfig           // terminal multiplexer configuration
 	Remotes       map[string]string   // name → URL prefix ("default" is the fallback)
 	DefaultBranch string              // default branch for all repos
@@ -203,8 +204,9 @@ type rawManifest struct {
 	Root      string                       `yaml:"root"`      // where repos live
 	Workspace string                       `yaml:"workspace"` // VS Code workspace filename
 	Scopes    *[]rawScopeDir               `yaml:"scopes"`    // generated scope symlink directories
-	Worktrees *bool                        `yaml:"worktrees"` // default worktree behavior
-	Mux       *rawMuxConfig                `yaml:"mux"`       // terminal multiplexer config
+	Worktrees    *bool                     `yaml:"worktrees"`      // default worktree behavior
+	WorktreeRoot string                    `yaml:"worktree_root"` // directory for created worktrees
+	Mux          *rawMuxConfig             `yaml:"mux"`           // terminal multiplexer config
 	Remotes   map[string]string            `yaml:"remotes"`   // named remotes
 	Branch    string                       `yaml:"branch"`
 	Groups    map[string][]string          `yaml:"groups"`
@@ -276,6 +278,9 @@ func parse(data []byte, requireRoot bool) (*Manifest, error) {
 	if raw.Worktrees != nil {
 		m.Worktrees = *raw.Worktrees
 		m.worktreesSet = true
+	}
+	if raw.WorktreeRoot != "" {
+		m.WorktreeRoot = raw.WorktreeRoot
 	}
 	if raw.Mux != nil {
 		m.Mux = parseMuxConfig(*raw.Mux)
@@ -381,6 +386,9 @@ func (m *Manifest) MergeLocal(path string) error {
 	if local.worktreesSet {
 		m.Worktrees = local.Worktrees
 		m.worktreesSet = true
+	}
+	if local.WorktreeRoot != "" {
+		m.WorktreeRoot = local.WorktreeRoot
 	}
 	if local.muxSet {
 		m.Mux = local.Mux
@@ -529,6 +537,19 @@ func (m *Manifest) ResolveRoot(wsHome string) string {
 		return m.Root
 	}
 	return filepath.Join(wsHome, m.Root)
+}
+
+// ResolveWorktreeRoot returns the absolute path where worktrees are stored.
+// Defaults to ".worktrees" relative to wsHome.
+func (m *Manifest) ResolveWorktreeRoot(wsHome string) string {
+	root := m.WorktreeRoot
+	if root == "" {
+		root = ".worktrees"
+	}
+	if filepath.IsAbs(root) {
+		return root
+	}
+	return filepath.Join(wsHome, root)
 }
 
 // ResolvePath returns the absolute path to a repo on disk.

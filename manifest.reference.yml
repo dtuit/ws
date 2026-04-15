@@ -113,6 +113,20 @@ scopes:
 worktrees: false
 
 # ---------------------------------------------------------------------------
+# worktree_root
+# ---------------------------------------------------------------------------
+# Directory where `ws worktree add` creates worktrees.
+# Relative to the workspace directory, or absolute.
+# Default: .worktrees
+#
+# Layout: <worktree_root>/<repo-name>/<branch>
+# Example: .worktrees/api/feature-a
+#
+# Worktrees are addressed as repo@branch (e.g., api@feature-a).
+
+worktree_root: .worktrees
+
+# ---------------------------------------------------------------------------
 # mux
 # ---------------------------------------------------------------------------
 # Terminal multiplexer (tmux/zellij) session configuration.

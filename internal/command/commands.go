@@ -12,7 +12,8 @@ const (
 	CommandFetch   = "fetch"
 	CommandPull    = "pull"
 	CommandContext = "context"
-	CommandMux     = "mux"
+	CommandMux      = "mux"
+	CommandWorktree = "worktree"
 )
 
 type builtinCommandAlias struct {
@@ -22,6 +23,7 @@ type builtinCommandAlias struct {
 
 var builtinCommandAliases = []builtinCommandAlias{
 	{Alias: "ctx", Name: CommandContext},
+	{Alias: "wt", Name: CommandWorktree},
 }
 
 // HelpEntry is a single usage line plus its description.
@@ -136,9 +138,21 @@ var builtinCommands = []BuiltinCommand{
 			{Usage: "mux [session]", Description: "Attach or create a terminal session (tmux/zellij)"},
 			{Usage: "mux kill [session]", Description: "Kill a session"},
 			{Usage: "mux ls", Description: "List multiplexer sessions"},
+			{Usage: "mux dup [window]", Description: "Duplicate a window/tab in the active session"},
 			{Usage: "mux save [--local] [session]", Description: "Save session layout to manifest"},
 		},
 		complete: completeMuxCommand,
+	},
+	{
+		Name:        CommandWorktree,
+		ShowInUsage: true,
+		Help: []HelpEntry{
+			{Usage: "worktree add <branch> [filter]", Description: "Create worktrees across repos"},
+			{Usage: "worktree remove <branch> [filter]", Description: "Remove worktrees across repos"},
+			{Usage: "worktree list [filter]", Description: "List worktrees per repo"},
+			{Usage: "wt add <branch> [filter]", Description: "Alias for worktree"},
+		},
+		complete: completeWorktreeCommand,
 	},
 }
 
