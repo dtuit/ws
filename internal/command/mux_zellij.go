@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -76,6 +77,18 @@ func (z *zellijMux) ActiveSession() (string, error) {
 }
 
 func (z *zellijMux) ActiveWindow(session string) (string, error) {
+	// ZELLIJ_PANE_ID identifies the pane running this process, which tells
+	// us which tab is active. is_focused is per-tab so it can't distinguish
+	// the active tab from background ones.
+	paneIDStr := os.Getenv("ZELLIJ_PANE_ID")
+	if paneIDStr == "" {
+		return "", fmt.Errorf("ZELLIJ_PANE_ID not set; specify the window name explicitly")
+	}
+	paneID, err := strconv.Atoi(paneIDStr)
+	if err != nil {
+		return "", fmt.Errorf("invalid ZELLIJ_PANE_ID %q: %w", paneIDStr, err)
+	}
+
 	cmd := exec.Command(z.bin, "action", "list-panes", "--json", "--tab", "--geometry")
 	cmd.Env = append(os.Environ(), "ZELLIJ_SESSION_NAME="+session)
 	out, err := cmd.Output()
@@ -89,11 +102,11 @@ func (z *zellijMux) ActiveWindow(session string) (string, error) {
 	}
 
 	for _, p := range panes {
-		if p.IsFocused {
+		if !p.IsPlugin && p.ID == paneID {
 			return p.TabName, nil
 		}
 	}
-	return "", fmt.Errorf("could not determine active tab; specify the window name explicitly")
+	return "", fmt.Errorf("pane %d not found in session %q; specify the window name explicitly", paneID, session)
 }
 
 func (z *zellijMux) AddWindow(session string, win MuxWindowSpec) error {
@@ -223,6 +236,7 @@ func (z *zellijMux) ListWindows(session string) ([]MuxWindowSpec, error) {
 
 // zellijPane is the JSON structure returned by zellij action list-panes --json --tab --geometry.
 type zellijPane struct {
+	ID          int    `json:"id"`
 	IsFocused   bool   `json:"is_focused"`
 	IsPlugin    bool   `json:"is_plugin"`
 	TabID       int    `json:"tab_id"`
