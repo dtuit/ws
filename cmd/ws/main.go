@@ -66,6 +66,14 @@ dispatch:
 		}
 	}
 
+	// Per-command help: ws <cmd> --help / ws <cmd> -h / ws <cmd> help
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
+		if help, ok := command.CommandHelpText(cmd); ok {
+			fmt.Print(help)
+			return
+		}
+	}
+
 	wsHome, err := findWorkspaceHome(wsHomeOverride)
 	if err != nil {
 		fatal(err)
@@ -199,7 +207,8 @@ dispatch:
 		args, root = stripBoolFlag(args, "--root")
 		args, localWorktrees := command.StripWorktreesFlags(args)
 		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
-		filter, err := parseOptionalFilterArg(args, "", false, "ws dirs [--root] [filter] ["+command.WorktreesFlagUsage+"]")
+		defaultFilter, hasDefaultFilter := command.GetDefaultContextForMode(m, wsHome, includeWorktrees)
+		filter, err := parseOptionalFilterArg(args, defaultFilter, hasDefaultFilter, "ws dirs [--root] [filter] ["+command.WorktreesFlagUsage+"]")
 		if err != nil {
 			fatal(err)
 		}

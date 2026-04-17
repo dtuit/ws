@@ -36,10 +36,11 @@ type HelpEntry struct {
 
 // BuiltinCommand describes one top-level built-in command.
 type BuiltinCommand struct {
-	Name        string
-	ShowInUsage bool
-	Help        []HelpEntry
-	complete    CompletionHandler
+	Name         string
+	ShowInUsage  bool
+	Help         []HelpEntry
+	DetailedHelp string // full help shown by `ws <cmd> --help`
+	complete     CompletionHandler
 }
 
 var builtinCommands = []BuiltinCommand{
@@ -58,6 +59,23 @@ var builtinCommands = []BuiltinCommand{
 			{Usage: "ll [filter]", Description: "Dashboard: branch, dirty, last commit"},
 			{Usage: "ll [" + LLBranchesFlagUsage + "] [filter]", Description: "Show all local branches in ll format"},
 		},
+		DetailedHelp: `Usage: ws ll [options] [filter]
+
+Show a dashboard of repo status: branch, dirty state, sync status,
+and last commit message.
+
+Options:
+  -b, --branches     Show all local branches instead of just current
+  -t, --worktrees    Expand filters to include linked worktrees
+  --no-worktrees     Force primary checkouts only
+
+Filters:
+  <group>            Show repos in a named group
+  <repo>             Show a single repo
+  dirty              Repos with uncommitted changes
+  active[:dur]       Recently active repos (default: 14d)
+  mine:<dur>         Repos with your commits within duration
+`,
 		complete: completeLLCommand,
 	},
 	{
@@ -66,6 +84,16 @@ var builtinCommands = []BuiltinCommand{
 		Help: []HelpEntry{
 			{Usage: "cd [repo[@worktree]] [" + CDWorktreeFlagUsage + " <selector>]", Description: "Print repo path (no arg = workspace root)"},
 		},
+		DetailedHelp: `Usage: ws cd [repo[@worktree]] [-t <selector>]
+
+Print the absolute path to a repo directory. With shell integration,
+changes the working directory.
+
+  ws cd                    Workspace root
+  ws cd api-server         Repo directory
+  ws cd api@feature        Worktree by name, branch, or path
+  ws cd api -t feature     Same, using flag syntax
+`,
 		complete: completeCDCommand,
 	},
 	{
@@ -108,6 +136,22 @@ var builtinCommands = []BuiltinCommand{
 			{Usage: "dirs [filter]", Description: "List repo directories (name and absolute path)"},
 			{Usage: "dirs --root", Description: "Print the workspace root path"},
 		},
+		DetailedHelp: `Usage: ws dirs [options] [filter]
+
+Print tab-separated repo name and absolute path pairs, one per line.
+Only shows cloned repos. Useful for scripts and AI agents.
+
+Options:
+  --root               Print only the workspace root path
+  -t, --worktrees      Include linked worktrees
+  --no-worktrees       Exclude worktrees
+
+Examples:
+  ws dirs                    All cloned repos
+  ws dirs backend            Repos in the backend group
+  ws dirs --root             Workspace root path only
+  ws -w /path dirs           From anywhere, targeting a workspace
+`,
 		complete: completeDirsCommand,
 	},
 	{
@@ -140,6 +184,28 @@ var builtinCommands = []BuiltinCommand{
 			{Usage: "context remove <filter>", Description: "Remove groups or repos from the existing context"},
 			{Usage: "context save [--local] <group>", Description: "Persist the current context as a named group"},
 		},
+		DetailedHelp: `Usage: ws context [subcommand] [options] [filter]
+
+Manage the default filter scope. When set, commands like ll, pull, and
+passthrough operate on the context repos by default.
+
+Subcommands:
+  (no subcommand)            Show current context
+  set <filter>               Set the context (also: ws context <filter>)
+  refresh                    Re-resolve and rebuild scope symlinks
+  .                          Shorthand for refresh
+  -                          Swap to the previous context (like cd -)
+  add <filter>               Add groups/repos to existing context
+  remove <filter>            Remove groups/repos from context
+  save [--local] <group>     Save context as a named group in manifest
+  none, reset                Clear the context
+
+Options:
+  -t, --worktrees            Include worktrees when resolving
+  --no-worktrees             Exclude worktrees
+
+Alias: ctx
+`,
 		complete: completeContextCommand,
 	},
 	{
@@ -152,6 +218,20 @@ var builtinCommands = []BuiltinCommand{
 			{Usage: "mux dup [window]", Description: "Duplicate a window/tab in the active session"},
 			{Usage: "mux save [--local] [session]", Description: "Save session layout to manifest"},
 		},
+		DetailedHelp: `Usage: ws mux [subcommand] [options]
+
+Manage terminal multiplexer sessions (tmux or zellij).
+
+Subcommands:
+  (no subcommand)            Attach or create the default session
+  [session]                  Attach or create a named session
+  kill [session]             Kill a session
+  ls                         List active sessions
+  dup [window]               Duplicate a window/tab in the active session
+  save [--local] [session]   Persist current layout to manifest
+
+Sessions are configured in manifest.yml under the mux: key.
+`,
 		complete: completeMuxCommand,
 	},
 	{
@@ -163,6 +243,17 @@ var builtinCommands = []BuiltinCommand{
 			{Usage: "worktree list [filter]", Description: "List worktrees per repo"},
 			{Usage: "wt add <branch> [filter]", Description: "Alias for worktree"},
 		},
+		DetailedHelp: `Usage: ws worktree <subcommand> [options]
+
+Manage git worktrees across repos.
+
+Subcommands:
+  add <branch> [filter]      Create linked worktrees for a branch
+  remove <branch> [filter]   Remove linked worktrees
+  list [filter]              List worktrees per repo
+
+Alias: wt
+`,
 		complete: completeWorktreeCommand,
 	},
 	{
@@ -173,6 +264,44 @@ var builtinCommands = []BuiltinCommand{
 			{Usage: "agent ls [-v] [-n N | --all] [filter]", Description: "List agent sessions across workspace"},
 			{Usage: "agent resume <#|id>", Description: "Resume a previous agent session"},
 		},
+		DetailedHelp: `Usage: ws agent [subcommand] [options]
+
+Start, list, and resume AI agent sessions across workspace repos.
+
+Subcommands:
+  (default)                        Start an agent session
+  ls [-v] [-n N | --all] [filter]  List sessions across workspace
+  resume <#|id>                    Resume a previous session
+
+Start options:
+  --agent, -a <name>   Select an agent profile (default: $WS_AGENT or "claude")
+  [repo]               Start in a repo directory (default: current dir)
+  -- <args...>         Pass remaining args to the agent CLI
+
+List options:
+  -v, --verbose        Show recap, full prompts, and last message
+  -n <N>               Limit output to N sessions (default: 20)
+  --all                Show all sessions
+  [filter]             Filter by group or repo name
+
+Resume:
+  <#>                  Numeric index from the most recent listing
+  <id>                 Partial session ID prefix
+
+Agent profiles are configured in manifest (typically manifest.local.yml):
+
+  agents:
+    default: claude
+    claude: claude
+    cc: IS_SANDBOX=1 claude --dangerously-skip-permissions
+    codex: codex --yolo
+
+Resume automatically detects --dangerously-skip-permissions from the
+original session and includes it in the resume command.
+
+Environment:
+  WS_AGENT             Default agent profile name (overrides agents.default)
+`,
 		complete: completeAgentCommand,
 	},
 }

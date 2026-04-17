@@ -53,3 +53,29 @@ func writeUsageEntry(b *strings.Builder, entry HelpEntry) {
 	}
 	fmt.Fprintf(b, "  %s\n%*s%s\n", entry.Usage, commandHelpSummaryIndent, "", entry.Description)
 }
+
+// CommandHelpText returns the detailed help text for a named command.
+// If the command has a DetailedHelp string, that is returned. Otherwise
+// the help entries are formatted into a short summary.
+func CommandHelpText(name string) (string, bool) {
+	cmd, ok := builtinCommandByName(name)
+	if !ok {
+		return "", false
+	}
+
+	if cmd.DetailedHelp != "" {
+		return cmd.DetailedHelp, true
+	}
+
+	if len(cmd.Help) == 0 {
+		return "", false
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Usage:\n")
+	for _, entry := range cmd.Help {
+		fmt.Fprintf(&b, "  ws %s\n", entry.Usage)
+		fmt.Fprintf(&b, "      %s\n\n", entry.Description)
+	}
+	return b.String(), true
+}
