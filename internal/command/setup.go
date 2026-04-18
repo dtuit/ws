@@ -3,20 +3,24 @@ package command
 import (
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/dtuit/ws/internal/git"
 	"github.com/dtuit/ws/internal/manifest"
 )
 
-// Setup clones missing repos for the selected filter.
-func Setup(m *manifest.Manifest, wsHome, filter string) error {
+// Setup clones missing repos for the selected filter. Returns the number
+// of repos cloned so callers can decide whether to run follow-up actions
+// (e.g. context refresh).
+func Setup(m *manifest.Manifest, wsHome, filter string) (int, error) {
 	repos, err := resolveFilterRepos(m, wsHome, filter, false)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(repos) == 0 {
 		fmt.Println("No repos matched the filter.")
-		return nil
+		return 0, nil
 	}
 
 	cloned := 0
@@ -57,5 +61,76 @@ func Setup(m *manifest.Manifest, wsHome, filter string) error {
 		fmt.Printf("Or run: ws shell install\n")
 	}
 
+	return cloned, nil
+}
+
+// SetupGuide prints a summary of active repos and groups, with suggested
+// commands for cloning a useful subset. Used when `ws setup` is run with no
+// filter and no context — better than cloning 100+ repos by default.
+func SetupGuide(m *manifest.Manifest, wsHome string) error {
+	active := m.ActiveRepos()
+	activeCount := len(active)
+
+	// Collect groups (skip empty ones), sort by name for stable output.
+	type groupInfo struct {
+		name    string
+		members []string
+	}
+	var groups []groupInfo
+	for name, members := range m.Groups {
+		if len(members) == 0 {
+			continue
+		}
+		groups = append(groups, groupInfo{name: name, members: members})
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].name < groups[j].name
+	})
+
+	if activeCount == 0 {
+		fmt.Println("No active repos in manifest. Add some to `repos:` in manifest.yml.")
+		return nil
+	}
+
+	fmt.Printf("This workspace has %d active repos", activeCount)
+	if len(groups) > 0 {
+		fmt.Printf(" across %d groups. Pick a subset to clone:\n\n", len(groups))
+
+		// Pad group names so members align.
+		maxName := 0
+		for _, g := range groups {
+			if n := len(g.name); n > maxName {
+				maxName = n
+			}
+		}
+		for _, g := range groups {
+			sample := g.members
+			const maxSample = 3
+			overflow := 0
+			if len(sample) > maxSample {
+				overflow = len(sample) - maxSample
+				sample = sample[:maxSample]
+			}
+			line := strings.Join(sample, ", ")
+			if overflow > 0 {
+				line += fmt.Sprintf(", +%d", overflow)
+			}
+			fmt.Printf("  %-*s  (%d)  %s\n", maxName, g.name, len(g.members), line)
+		}
+		fmt.Println()
+		fmt.Println("Recommended flow:")
+		fmt.Println("  ws context <group>       # pick one from above")
+		fmt.Println("  ws setup                 # clone just those")
+		fmt.Println()
+	} else {
+		fmt.Printf(". No groups defined.\n\n")
+	}
+
+	fmt.Println("Other options:")
+	fmt.Println("  ws setup <repo>          # a single repo")
+	fmt.Println("  ws setup all             # clone everything (slow for large workspaces)")
+	fmt.Println()
+
+	fmt.Println("Current context: (not set)")
 	return nil
 }

@@ -11,8 +11,9 @@ import (
 )
 
 // discoverCodexSessions queries ~/.codex/state_5.sqlite for threads
-// whose cwd matches the workspace path index.
-func discoverCodexSessions(pathIndex map[string]string) []AgentSession {
+// whose cwd matches the workspace path index. When external is true,
+// returns sessions whose cwd does NOT match.
+func discoverCodexSessions(pathIndex map[string]string, external bool) []AgentSession {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -56,8 +57,13 @@ func discoverCodexSessions(pathIndex map[string]string) []AgentSession {
 		createdAt := parseUnixSeconds(fields[4])
 		updatedAt := parseUnixSeconds(fields[5])
 
-		repo, ok := matchSessionRepo(cwd, pathIndex)
-		if !ok {
+		repo, matched := matchSessionRepo(cwd, pathIndex)
+		if external {
+			if matched {
+				continue
+			}
+			repo = externalRepoLabel(cwd)
+		} else if !matched {
 			continue
 		}
 

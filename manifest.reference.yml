@@ -97,7 +97,7 @@ scopes:
 # Default: false
 #
 # When true, these commands include linked git worktrees by default:
-#   ws list
+#   ws repos
 #   ws ll
 #   ws pull
 #   ws context

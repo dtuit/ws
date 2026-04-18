@@ -25,8 +25,10 @@ type claudeSessionMeta struct {
 }
 
 // discoverClaudeSessions reads ~/.claude/history.jsonl and returns sessions
-// whose project paths match the workspace path index.
-func discoverClaudeSessions(pathIndex map[string]string) []AgentSession {
+// whose project paths match the workspace path index. When external is true,
+// returns sessions whose project paths do NOT match (for discovering sessions
+// from outside the current workspace).
+func discoverClaudeSessions(pathIndex map[string]string, external bool) []AgentSession {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -100,8 +102,13 @@ func discoverClaudeSessions(pathIndex map[string]string) []AgentSession {
 	var sessions []AgentSession
 	for _, sid := range order {
 		s := accum[sid]
-		repo, ok := matchSessionRepo(s.project, pathIndex)
-		if !ok {
+		repo, matched := matchSessionRepo(s.project, pathIndex)
+		if external {
+			if matched {
+				continue // in-workspace sessions are excluded in external mode
+			}
+			repo = externalRepoLabel(s.project)
+		} else if !matched {
 			continue
 		}
 

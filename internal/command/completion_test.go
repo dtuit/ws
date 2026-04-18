@@ -114,7 +114,7 @@ repos:
 	assert.Contains(t, result.Values, "ai")
 }
 
-func TestCompleteListIncludesWorktreesFlagAndShowAll(t *testing.T) {
+func TestCompleteReposIncludesWorktreesFlagAndShowAll(t *testing.T) {
 	m, err := parseManifestYAML(`
 remotes:
   default: git@example.com
@@ -123,7 +123,7 @@ repos:
 `)
 	require.NoError(t, err)
 
-	result := Complete(m, []string{"list", ""}, 1)
+	result := Complete(m, []string{"repos", ""}, 1)
 	assert.Contains(t, result.Values, "--all")
 	assert.Contains(t, result.Values, "-a")
 	assert.Contains(t, result.Values, "-t")

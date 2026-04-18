@@ -13,9 +13,18 @@ import (
 
 func writeWorkspace(m *manifest.Manifest, wsHome string, repos []manifest.RepoInfo, includeWorktrees bool) error {
 	wsFile := filepath.Join(wsHome, m.Workspace)
-	worktreeCount := workspaceWorktreeCount(repos, wsHome)
 
-	ws := buildWorkspace(repos, wsHome, includeWorktrees)
+	// Filter to cloned repos — avoids VS Code showing missing folders when
+	// a context is set before the repos are cloned.
+	cloned := make([]manifest.RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if git.IsCheckout(repo.Path) {
+			cloned = append(cloned, repo)
+		}
+	}
+	worktreeCount := workspaceWorktreeCount(cloned, wsHome)
+
+	ws := buildWorkspace(cloned, wsHome, includeWorktrees)
 
 	out, err := json.MarshalIndent(ws, "", "  ")
 	if err != nil {
@@ -31,7 +40,7 @@ func writeWorkspace(m *manifest.Manifest, wsHome string, repos []manifest.RepoIn
 		return err
 	}
 
-	fmt.Println(workspaceSummary(m.Workspace, len(repos), worktreeCount, includeWorktrees))
+	fmt.Println(workspaceSummary(m.Workspace, len(cloned), worktreeCount, includeWorktrees))
 	return nil
 }
 

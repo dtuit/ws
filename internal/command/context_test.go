@@ -509,6 +509,8 @@ repos:
   local-repo:
 `)
 
+	initCheckout(t, filepath.Join(wsHome, "repos", "local-repo"))
+
 	require.NoError(t, AddContext(m, wsHome, "local-repo", false))
 
 	state := readStoredContext(t, wsHome)

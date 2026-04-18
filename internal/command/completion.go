@@ -108,7 +108,7 @@ func completeCDCommand(m *manifest.Manifest, args []string, current int) Complet
 	}
 }
 
-func completeListCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
+func completeReposCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
 	return finalizeCompletion(append([]string{"--all", "-a"}, worktreesFlagSuggestions()...), completionWord(args, current), false)
 }
 
@@ -118,12 +118,21 @@ func completeAgentCommand(m *manifest.Manifest, args []string, current int) Comp
 	}
 	currentWord := completionWord(args, current)
 	if current == 0 {
-		values := []string{"ls", "resume", "--agent", "-a"}
+		values := []string{"list", "ls", "resume", "--agent", "-a"}
 		values = append(values, repoSuggestions(m)...)
 		return finalizeCompletion(values, currentWord, false)
 	}
-	if len(args) > 0 && args[0] == "ls" {
-		return completeFilterCommand(m, args[1:], current-1, []string{"-n", "--all", "-v", "--verbose"})
+	if len(args) > 0 && (args[0] == "list" || args[0] == "ls") {
+		result := completeFilterCommand(m, args[1:], current-1, []string{"-n", "--all", "-v", "--verbose"})
+		// Add agent-specific filter tokens when completing a filter position
+		if current-1 >= 0 {
+			for _, extra := range []string{".", "root", "external"} {
+				if strings.HasPrefix(extra, currentWord) {
+					result.Values = append(result.Values, extra)
+				}
+			}
+		}
+		return result
 	}
 	return finalizeCompletion(repoSuggestions(m), currentWord, false)
 }
@@ -135,7 +144,8 @@ func completeDirsCommand(m *manifest.Manifest, args []string, current int) Compl
 
 func completeSetupCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
 	if current == 0 {
-		return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
+		values := append([]string{"--all", "-a"}, filterSuggestions(m)...)
+		return finalizeCompletion(values, completionWord(args, current), false)
 	}
 	return CompletionResult{}
 }
@@ -258,7 +268,7 @@ func completeContextCommand(m *manifest.Manifest, args []string, current int) Co
 
 func completeMuxCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
 	if current == 0 {
-		return finalizeCompletion([]string{"dup", "kill", "ls", "save"}, completionWord(args, current), false)
+		return finalizeCompletion([]string{"dup", "kill", "list", "ls", "save"}, completionWord(args, current), false)
 	}
 	return CompletionResult{}
 }

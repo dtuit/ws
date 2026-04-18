@@ -36,6 +36,12 @@ const (
 	AgentDefaultLimit = 20
 	agentClaude       = "claude"
 	agentCodex        = "codex"
+
+	// Special filter tokens for `ws agent ls`
+	agentFilterCwd      = "."        // current directory
+	agentFilterRoot     = "root"     // workspace root sessions only
+	agentFilterExternal = "external" // sessions outside the workspace
+	agentRootRepoName   = "(root)"
 )
 
 // AgentListMode controls optional agent list output extensions.
@@ -45,8 +51,26 @@ type AgentListMode struct {
 
 // AgentList discovers and prints agent sessions across the workspace.
 func AgentList(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool, limit int, mode AgentListMode) error {
-	pathIndex := buildPathIndex(m, wsHome, filter, includeWorktrees)
-	sessions := discoverAllSessions(pathIndex)
+	filter, err := resolveAgentListFilter(m, wsHome, filter)
+	if err != nil {
+		return err
+	}
+
+	// External mode: discover sessions outside the workspace.
+	// Build the full workspace path index so we can exclude matches.
+	external := filter == agentFilterExternal
+	pathIndexFilter := filter
+	if external {
+		pathIndexFilter = ""
+	}
+	pathIndex := buildPathIndex(m, wsHome, pathIndexFilter, includeWorktrees)
+
+	sessions := discoverAllSessions(pathIndex, external)
+
+	// Post-filter for special tokens that buildPathIndex can't express
+	if filter == agentFilterRoot {
+		sessions = filterSessionsByRepo(sessions, agentRootRepoName)
+	}
 
 	if len(sessions) == 0 {
 		fmt.Fprintln(os.Stderr, "No agent sessions found in this workspace.")
@@ -69,7 +93,7 @@ func AgentList(m *manifest.Manifest, wsHome, filter string, includeWorktrees boo
 // identified by numeric index (1-based) or partial session ID.
 func AgentResume(m *manifest.Manifest, wsHome string, indexOrID string) error {
 	pathIndex := buildPathIndex(m, wsHome, "", false)
-	sessions := discoverAllSessions(pathIndex)
+	sessions := discoverAllSessions(pathIndex, false)
 
 	if len(sessions) == 0 {
 		return fmt.Errorf("no agent sessions found in this workspace")
@@ -194,9 +218,14 @@ func reconcileClaudePermissionFlag(cmd string, needsBypass bool) string {
 func buildPathIndex(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) map[string]string {
 	index := make(map[string]string)
 
+	if filter == agentFilterRoot {
+		index[wsHome] = agentRootRepoName
+		return index
+	}
+
 	var repos []manifest.RepoInfo
 	if filter == "" {
-		index[wsHome] = "(root)"
+		index[wsHome] = agentRootRepoName
 		repos = m.AllRepos(wsHome)
 	} else {
 		var err error
@@ -238,6 +267,68 @@ func matchSessionRepo(dir string, pathIndex map[string]string) (string, bool) {
 	return "", false
 }
 
+// resolveAgentListFilter converts special filter tokens to concrete values.
+// "." becomes the repo name (or "root") matching the current directory.
+// "root" is passed through and handled post-discovery.
+func resolveAgentListFilter(m *manifest.Manifest, wsHome, filter string) (string, error) {
+	if filter != agentFilterCwd {
+		return filter, nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolving current directory: %w", err)
+	}
+
+	// Build a full path index (no filter) to find what contains cwd
+	fullIndex := buildPathIndex(m, wsHome, "", false)
+	name, ok := matchSessionRepo(cwd, fullIndex)
+	if !ok {
+		return "", fmt.Errorf("current directory is not inside the workspace (%s)", wsHome)
+	}
+
+	if name == agentRootRepoName {
+		return agentFilterRoot, nil
+	}
+	return name, nil
+}
+
+// externalRepoLabel derives a display label for a session directory that is
+// outside the current workspace. Uses the basename, with ~ substitution
+// for the user's home directory to keep things readable.
+func externalRepoLabel(dir string) string {
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		if dir == home {
+			return "~"
+		}
+		if strings.HasPrefix(dir, home+string(filepath.Separator)) {
+			rel := strings.TrimPrefix(dir, home+string(filepath.Separator))
+			// Collapse deep paths: show the last 2 components
+			parts := strings.Split(rel, string(filepath.Separator))
+			if len(parts) > 2 {
+				return ".../" + filepath.Join(parts[len(parts)-2:]...)
+			}
+			return "~/" + rel
+		}
+	}
+	base := filepath.Base(dir)
+	if base == "" || base == "/" {
+		return dir
+	}
+	return base
+}
+
+func filterSessionsByRepo(sessions []AgentSession, repoName string) []AgentSession {
+	filtered := make([]AgentSession, 0, len(sessions))
+	for _, s := range sessions {
+		if s.Repo == repoName {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
+}
+
 func enrichSessionVerboseInfo(sessions []AgentSession) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -253,13 +344,13 @@ func enrichSessionVerboseInfo(sessions []AgentSession) {
 	}
 }
 
-func discoverAllSessions(pathIndex map[string]string) []AgentSession {
+func discoverAllSessions(pathIndex map[string]string, external bool) []AgentSession {
 	var sessions []AgentSession
 
-	if cs := discoverClaudeSessions(pathIndex); len(cs) > 0 {
+	if cs := discoverClaudeSessions(pathIndex, external); len(cs) > 0 {
 		sessions = append(sessions, cs...)
 	}
-	if cs := discoverCodexSessions(pathIndex); len(cs) > 0 {
+	if cs := discoverCodexSessions(pathIndex, external); len(cs) > 0 {
 		sessions = append(sessions, cs...)
 	}
 

@@ -161,12 +161,44 @@ dispatch:
 				fatal(fmt.Errorf("ws setup --install-shell has moved to `ws shell install`"))
 			}
 		}
+		// --all / -a are sugar for the "all" filter (discoverable alongside
+		// `ws repos --all`). Strip them before the positional parse.
+		var showAll bool
+		args, showAll = stripBoolFlag(args, "--all", "-a")
+		if showAll && len(args) > 0 {
+			fatal(fmt.Errorf("ws setup --all takes no filter (got %q)", args[0]))
+		}
+
+		// With no filter arg and no context, show the setup guide instead
+		// of cloning everything — large workspaces shouldn't nuke disk by
+		// default.
+		if !showAll && len(args) == 0 && rawCtx == "" {
+			if err := command.SetupGuide(m, wsHome); err != nil {
+				fatal(err)
+			}
+			return
+		}
+
 		filter, err := parseOptionalFilterArg(args, rawCtx, rawCtx != "", "ws setup [filter]")
 		if err != nil {
 			fatal(err)
 		}
-		if err := command.Setup(m, wsHome, filter); err != nil {
+		if showAll {
+			filter = "all"
+		}
+		cloned, err := command.Setup(m, wsHome, filter)
+		if err != nil {
 			fatal(err)
+		}
+		// If a context is set and we actually cloned something, refresh
+		// the scope symlinks and VS Code workspace file so they pick up
+		// the newly-cloned paths. Use the same worktree resolution as
+		// other commands in this dispatch.
+		if cloned > 0 && rawCtx != "" {
+			includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees)
+			if err := command.RefreshContext(m, wsHome, includeWorktrees); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not refresh context: %v\n", err)
+			}
 		}
 
 	case command.CommandShell:
@@ -190,12 +222,12 @@ dispatch:
 			fatal(err)
 		}
 
-	case command.CommandList:
+	case command.CommandRepos:
 		showAll := false
 		args, showAll = stripBoolFlag(args, "--all", "-a")
 		args, localWorktrees := command.StripWorktreesFlags(args)
 		if len(args) > 0 {
-			fatal(fmt.Errorf("list does not take a filter"))
+			fatal(fmt.Errorf("repos does not take a filter"))
 		}
 		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees, localWorktrees)
 		if err := command.List(m, wsHome, showAll, includeWorktrees); err != nil {

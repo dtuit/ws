@@ -5,53 +5,95 @@ import (
 	"strings"
 )
 
-const commandHelpSummaryIndent = 25
+// Description column for `ws help`. Wide enough for "context|ctx [subcommand]".
+const commandHelpSummaryIndent = 27
 
-// UsageText renders the `ws help` output from the shared command metadata.
+// UsageText renders the `ws help` output grouped by category.
 func UsageText() string {
 	var b strings.Builder
-	b.WriteString("Usage: ws [-w <path>] <command> [args]\n\nCommands:\n")
-	for _, entry := range BuiltinUsageEntries() {
-		writeUsageEntry(&b, entry)
+	b.WriteString("Usage: ws [-w <path>] <command> [args]\n")
+
+	for _, cat := range categoryOrder {
+		cmds := commandsInCategory(cat)
+		if len(cmds) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n%s:\n", cat)
+		for _, cmd := range cmds {
+			writeUsageEntry(&b, cmd.summaryLine())
+		}
 	}
+
 	b.WriteString(`
-Worktree options:
-  -t, --worktrees     Expand repo/group filters to linked worktrees
-  --no-worktrees      Force primary checkouts only
-
-Context shorthand:
-  ctx                 Alias for "context"
-
-Any unrecognized command is run across repos:
-  ws git status          Run "git status" in all repos
-  ws -t git status
-                         Run "git status" in all discovered worktrees
-  ws ai git log -1       Run "git log -1" in a group
-  ws ls -la              Any command, not just git
-
-Use -- to escape built-in names:
-  ws -- fetch data.json
-                         Run "fetch data.json" (not git fetch)
-
-Filters:
+Filters (apply to most commands):
   all                    All active repos (default)
   dirty                  Repos with uncommitted changes
-  active[:dur]           dirty or local-user commits within dur
-  mine:<dur>             local-user commits within dur
-  dur                    Positive duration with s, m, h, d, or w suffix
-  <group>                Group name: ai, eng, db, inf
-  <group>,<group>        Comma-separated groups
+  active[:dur]           Dirty or your commits within dur (default 14d)
+  mine:<dur>             Your commits within dur
+  <group>                Named group from manifest
   <repo>                 Individual repo name
+  <repo>,<group>         Comma-separated mix of repos and groups
+  dur suffixes           s, m, h, d, w
+
+Worktrees:
+  -t, --worktrees        Expand filters to include linked worktrees
+  --no-worktrees         Primary checkouts only
+
+Examples:
+  ws ll dirty            Status of repos with uncommitted changes
+  ws pull backend        Pull the "backend" repo group (from manifest)
+  ws ll active:7d        Repos active in the last week
+  ws dirs mine:1w        Paths for repos you touched this week
+  ws -t git status       Run any command across repos + worktrees
+  ws -- fetch data.json  Escape built-in names (runs plain "fetch")
+
+See ` + "`ws <command> --help`" + ` for options, subcommands, and examples.
 `)
 	return b.String()
 }
 
+// summaryLine returns the HelpEntry shown for this command in `ws help`.
+// Aliases are noted parenthetically in the description.
+func (c BuiltinCommand) summaryLine() HelpEntry {
+	summary := c.Summary
+	if summary.Usage == "" && summary.Description == "" && len(c.Help) > 0 {
+		// Fall back to the first Help entry, stripping the name prefix.
+		first := c.Help[0]
+		summary.Description = first.Description
+		summary.Usage = strings.TrimLeft(strings.TrimPrefix(first.Usage, c.Name), " ")
+	}
+
+	usage := c.Name
+	if summary.Usage != "" {
+		usage += " " + summary.Usage
+	}
+
+	description := summary.Description
+	if len(c.Aliases) > 0 {
+		description += fmt.Sprintf(" (alias: %s)", strings.Join(c.Aliases, ", "))
+	}
+	return HelpEntry{Usage: usage, Description: description}
+}
+
+func commandsInCategory(cat Category) []BuiltinCommand {
+	var out []BuiltinCommand
+	for _, cmd := range builtinCommands {
+		if !cmd.ShowInUsage || cmd.Category != cat {
+			continue
+		}
+		out = append(out, cmd)
+	}
+	return out
+}
+
 func writeUsageEntry(b *strings.Builder, entry HelpEntry) {
-	if len(entry.Usage) <= commandHelpSummaryIndent-2 {
-		fmt.Fprintf(b, "  %-*s %s\n", commandHelpSummaryIndent-2, entry.Usage, entry.Description)
+	const prefix = "  "
+	usageBudget := commandHelpSummaryIndent - len(prefix) - 1
+	if len(entry.Usage) <= usageBudget {
+		fmt.Fprintf(b, "%s%-*s %s\n", prefix, usageBudget, entry.Usage, entry.Description)
 		return
 	}
-	fmt.Fprintf(b, "  %s\n%*s%s\n", entry.Usage, commandHelpSummaryIndent, "", entry.Description)
+	fmt.Fprintf(b, "%s%s\n%*s%s\n", prefix, entry.Usage, commandHelpSummaryIndent, "", entry.Description)
 }
 
 // CommandHelpText returns the detailed help text for a named command.

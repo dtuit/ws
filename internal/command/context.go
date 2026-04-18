@@ -340,8 +340,13 @@ func syncScopeDir(wsHome, dir string, repos []manifest.RepoInfo) error {
 		return fmt.Errorf("creating scope dir %s: %w", dir, err)
 	}
 
-	// Create symlinks for scoped repos
+	// Create symlinks only for cloned repos — avoids dangling symlinks when
+	// a context is set before the repos have been cloned.
+	created := 0
 	for _, repo := range repos {
+		if !git.IsCheckout(repo.Path) {
+			continue
+		}
 		target := repo.Path
 		link := filepath.Join(absDir, repo.Name)
 
@@ -353,10 +358,12 @@ func syncScopeDir(wsHome, dir string, repos []manifest.RepoInfo) error {
 
 		if err := os.Symlink(relTarget, link); err != nil && !os.IsExist(err) {
 			fmt.Fprintf(os.Stderr, "Warning: could not symlink %s: %v\n", repo.Name, err)
+			continue
 		}
+		created++
 	}
 
-	fmt.Printf("%s/ updated (%d symlinks)\n", filepath.ToSlash(dir), len(repos))
+	fmt.Printf("%s/ updated (%d symlinks)\n", filepath.ToSlash(dir), created)
 	return nil
 }
 

@@ -233,8 +233,8 @@ ws ll [filter]
                           Dashboard: branch, dirty state, last commit
 ws ll [--branches|-b] [filter]
                           Show all local branches in ll format
-ws list [--all]
-                          Show repos in the manifest (--all includes excluded)
+ws repos [--all]
+                          Show repos in the manifest (--all includes excluded; alias: list)
 ws setup [filter]         Clone missing repos
 ws shell init             Emit shell integration and completion
 ws shell install          Write shell config for ws cd and completion
@@ -262,7 +262,7 @@ Worktree options:
 - `-t`, `--worktrees`: expand repo/group filters to linked worktrees
 - `--no-worktrees`: force primary checkouts only
 
-Supported commands share one worktree mode. Set `worktrees: true` in `manifest.local.yml` if you want `list`, `ll`, `pull`, `context`, and fan-out commands to include linked worktrees by default.
+Supported commands share one worktree mode. Set `worktrees: true` in `manifest.local.yml` if you want `repos`, `ll`, `pull`, `context`, and fan-out commands to include linked worktrees by default.
 
 Any unrecognized command is executed across repos automatically:
 
@@ -302,9 +302,9 @@ Use groups for named subsets. The default `all` filter includes every active rep
 
 `ws` discovers linked git worktrees at runtime from the manifest checkout. They are not stored as individual repos in `manifest.yml`.
 
-- Set `worktrees: true` in `manifest.local.yml` to make worktree-aware behavior the default across `list`, `ll`, `pull`, `context`, and fan-out commands.
+- Set `worktrees: true` in `manifest.local.yml` to make worktree-aware behavior the default across `repos`, `ll`, `pull`, `context`, and fan-out commands.
 - Without that setting, commands default to the manifest checkout for each repo.
-- `ws list` shows a `WT` count for each repo; worktree mode expands it to one row per checkout.
+- `ws repos` shows a `WT` count for each repo; worktree mode expands it to one row per checkout.
 - `ws ll`, `ws ll --branches`, `ws pull`, `ws context`, and `ws <command...>` follow the same worktree mode instead of each command behaving differently.
 - Use `-t` or `--worktrees` to enable worktree mode for one command, or `--no-worktrees` to disable it for one command.
 - `ws cd api-server -t feature/auth` resolves a linked worktree by unique branch, path basename, or exact path.
@@ -370,7 +370,7 @@ Recommended operator and agent loop:
    To widen an existing scope, use `ws context add <filter>`.
    To narrow the current scope, use `ws context remove <filter>`.
    To re-resolve the saved filter after activity or worktree changes, use `ws context refresh`.
-2. Verify the scope with `ws ll` or `ws list`.
+2. Verify the scope with `ws ll` or `ws repos`.
 3. Start the agent from `.scope/` or another configured scope dir when you want filesystem visibility to match that context.
 4. Return to the workspace root when you need to change scope or edit `manifest.yml`.
 
@@ -475,3 +475,8 @@ Use `ws context save --local <group>` when the saved group should live only in `
 | `WS_HOME` | Optional workspace root override |
 | `WS_WORKERS` | Max parallel workers (default: CPU count) |
 | `NO_COLOR` | Disable colored output |
+
+---
+
+See [DESIGN.md](DESIGN.md) for rationale behind CLI shape decisions (help
+layout, aliases, passthrough model, why not Cobra).

@@ -1,6 +1,8 @@
 package command
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -248,6 +250,55 @@ repos:
 	s := AgentSession{Agent: agentCodex, SessionID: "xyz-789"}
 	cmd := agentResumeCmd(m, s)
 	assert.Equal(t, "codex --yolo resume xyz-789", cmd)
+}
+
+func TestFilterSessionsByRepo(t *testing.T) {
+	sessions := []AgentSession{
+		{SessionID: "a", Repo: "(root)"},
+		{SessionID: "b", Repo: "api"},
+		{SessionID: "c", Repo: "(root)"},
+		{SessionID: "d", Repo: "web"},
+	}
+
+	result := filterSessionsByRepo(sessions, "(root)")
+	assert.Len(t, result, 2)
+	assert.Equal(t, "a", result[0].SessionID)
+	assert.Equal(t, "c", result[1].SessionID)
+}
+
+func TestExternalRepoLabel(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	// Home directory itself
+	assert.Equal(t, "~", externalRepoLabel(home))
+
+	// Direct child of home (1 component)
+	assert.Equal(t, "~/projects", externalRepoLabel(filepath.Join(home, "projects")))
+
+	// 2 components under home
+	assert.Equal(t, "~/code/thing", externalRepoLabel(filepath.Join(home, "code", "thing")))
+
+	// 3+ components collapse to last two
+	assert.Equal(t, ".../deep/thing", externalRepoLabel(filepath.Join(home, "a", "b", "deep", "thing")))
+
+	// Outside home — uses basename
+	assert.Equal(t, "tmp", externalRepoLabel("/tmp"))
+	assert.Equal(t, "project", externalRepoLabel("/opt/project"))
+}
+
+func TestBuildPathIndex_RootFilter(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  default: git@example.com
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+
+	index := buildPathIndex(m, "/tmp/ws", agentFilterRoot, false)
+	assert.Equal(t, map[string]string{"/tmp/ws": "(root)"}, index)
 }
 
 func TestReconcileClaudePermissionFlag(t *testing.T) {

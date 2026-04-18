@@ -15,7 +15,7 @@ func TestBuiltinCommandNames(t *testing.T) {
 		CommandSetup,
 		CommandShell,
 		CommandOpen,
-		CommandList,
+		CommandRepos,
 		CommandDirs,
 		CommandFetch,
 		CommandPull,
@@ -43,10 +43,6 @@ func TestBuiltinUsageEntries(t *testing.T) {
 		Description: "Re-resolve the stored context and rebuild scope",
 	})
 	assert.Contains(t, entries, HelpEntry{
-		Usage:       "ctx [filter]",
-		Description: "Alias for context",
-	})
-	assert.Contains(t, entries, HelpEntry{
 		Usage:       "ll [filter]",
 		Description: "Dashboard: branch, dirty, last commit",
 	})
@@ -70,6 +66,28 @@ func TestBuiltinUsageEntries(t *testing.T) {
 		Usage:       CommandVersion,
 		Description: "",
 	})
+}
+
+func TestUsageTextGroupsByCategory(t *testing.T) {
+	out := UsageText()
+
+	// Category headings appear in order.
+	for _, heading := range []string{"Inspect:", "Sync:", "Scope:", "Tools:", "Install:"} {
+		assert.Contains(t, out, heading)
+	}
+
+	// Aliases render parenthetically in the description.
+	assert.Contains(t, out, "(alias: ctx)")
+	assert.Contains(t, out, "(alias: wt)")
+	assert.Contains(t, out, "(alias: list)")
+
+	// Dedicated alias rows are gone.
+	assert.NotContains(t, out, "ctx [filter]    Alias")
+
+	// Filters block and examples are present.
+	assert.Contains(t, out, "Filters (apply to most commands):")
+	assert.Contains(t, out, "Examples:")
+	assert.Contains(t, out, "ws pull backend")
 }
 
 func TestResolveBuiltinCommandName(t *testing.T) {

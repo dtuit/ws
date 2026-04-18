@@ -8,7 +8,7 @@ const (
 	CommandSetup   = "setup"
 	CommandShell   = "shell"
 	CommandOpen    = "open"
-	CommandList    = "list"
+	CommandRepos   = "repos"
 	CommandFetch   = "fetch"
 	CommandPull    = "pull"
 	CommandAgent   = "agent"
@@ -18,14 +18,24 @@ const (
 	CommandWorktree = "worktree"
 )
 
-type builtinCommandAlias struct {
-	Alias string
-	Name  string
-}
+// Category groups related commands under one heading in `ws help`.
+type Category string
 
-var builtinCommandAliases = []builtinCommandAlias{
-	{Alias: "ctx", Name: CommandContext},
-	{Alias: "wt", Name: CommandWorktree},
+const (
+	CategoryInspect Category = "Inspect"
+	CategorySync    Category = "Sync"
+	CategoryScope   Category = "Scope"
+	CategoryTools   Category = "Tools"
+	CategoryInstall Category = "Install"
+)
+
+// categoryOrder is the order categories appear in `ws help`.
+var categoryOrder = []Category{
+	CategoryInspect,
+	CategorySync,
+	CategoryScope,
+	CategoryTools,
+	CategoryInstall,
 }
 
 // HelpEntry is a single usage line plus its description.
@@ -37,7 +47,10 @@ type HelpEntry struct {
 // BuiltinCommand describes one top-level built-in command.
 type BuiltinCommand struct {
 	Name         string
+	Aliases      []string // short or alternate names, rendered as name|alias in help
+	Category     Category // grouping heading in `ws help`; empty hides the command
 	ShowInUsage  bool
+	Summary      HelpEntry // single-line summary for `ws help`; Usage is args only (no name)
 	Help         []HelpEntry
 	DetailedHelp string // full help shown by `ws <cmd> --help`
 	complete     CompletionHandler
@@ -54,7 +67,9 @@ var builtinCommands = []BuiltinCommand{
 	},
 	{
 		Name:        CommandLL,
+		Category:    CategoryInspect,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[filter]", Description: "Dashboard: branch, dirty, last commit"},
 		Help: []HelpEntry{
 			{Usage: "ll [filter]", Description: "Dashboard: branch, dirty, last commit"},
 			{Usage: "ll [" + LLBranchesFlagUsage + "] [filter]", Description: "Show all local branches in ll format"},
@@ -80,7 +95,9 @@ Filters:
 	},
 	{
 		Name:        CommandCD,
+		Category:    CategoryInspect,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[repo[@worktree]]", Description: "Print/cd to a repo directory"},
 		Help: []HelpEntry{
 			{Usage: "cd [repo[@worktree]] [" + CDWorktreeFlagUsage + " <selector>]", Description: "Print repo path (no arg = workspace root)"},
 		},
@@ -98,15 +115,43 @@ changes the working directory.
 	},
 	{
 		Name:        CommandSetup,
+		Category:    CategorySync,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[filter|all]", Description: "Clone missing repos"},
 		Help: []HelpEntry{
-			{Usage: "setup [filter]", Description: "Clone missing repos"},
+			{Usage: "setup", Description: "Show a setup guide (or clone context repos if set)"},
+			{Usage: "setup <filter>", Description: "Clone repos matching the filter"},
+			{Usage: "setup all", Description: "Clone every active repo in the manifest"},
+			{Usage: "setup [--all|-a]", Description: "Alias for `setup all`"},
 		},
+		DetailedHelp: `Usage: ws setup [filter|all]
+
+Clone missing repos. By default:
+  - With no filter and no context set: prints a setup guide listing
+    available groups and suggested commands. Clones nothing.
+  - With a context set: clones the repos in the context.
+  - With a filter: clones repos matching the filter.
+
+If a context is set and new repos are cloned, the scope symlinks and
+VS Code workspace file are refreshed to include the new paths.
+
+Forms:
+  ws setup                  Show guide (or clone context if set)
+  ws setup <repo>           Clone a single repo
+  ws setup <group>          Clone all repos in a group
+  ws setup all              Clone every active repo
+  ws setup --all            Alias for ` + "`" + `setup all` + "`" + `
+
+Note: activity filters (active, dirty, mine) need local git state, so
+they return nothing on a fresh workspace.
+`,
 		complete: completeSetupCommand,
 	},
 	{
 		Name:        CommandShell,
+		Category:    CategoryInstall,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "init|install", Description: "Shell integration and completion"},
 		Help: []HelpEntry{
 			{Usage: "shell init", Description: "Emit shell integration and completion"},
 			{Usage: "shell install", Description: "Write shell config for ws cd and completion"},
@@ -115,23 +160,30 @@ changes the working directory.
 	},
 	{
 		Name:        CommandOpen,
+		Category:    CategoryTools,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[--editor <name>]", Description: "Open the workspace in an editor"},
 		Help: []HelpEntry{
 			{Usage: "open [--editor <name>]", Description: "Open workspace (default: code, or WS_EDITOR)"},
 		},
 		complete: completeNoopCommand,
 	},
 	{
-		Name:        CommandList,
+		Name:        CommandRepos,
+		Aliases:     []string{"list"},
+		Category:    CategoryInspect,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[--all]", Description: "Show repos in the manifest"},
 		Help: []HelpEntry{
-			{Usage: "list [--all]", Description: "Show repos in manifest (--all includes excluded)"},
+			{Usage: "repos [--all]", Description: "Show repos in manifest (--all includes excluded; alias: list)"},
 		},
-		complete: completeListCommand,
+		complete: completeReposCommand,
 	},
 	{
 		Name:        CommandDirs,
+		Category:    CategoryInspect,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[filter]", Description: "Print repo paths (scripts/agents)"},
 		Help: []HelpEntry{
 			{Usage: "dirs [filter]", Description: "List repo directories (name and absolute path)"},
 			{Usage: "dirs --root", Description: "Print the workspace root path"},
@@ -156,7 +208,9 @@ Examples:
 	},
 	{
 		Name:        CommandFetch,
+		Category:    CategorySync,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[filter]", Description: "Fetch all repos"},
 		Help: []HelpEntry{
 			{Usage: "fetch [filter]", Description: "Fetch all repos"},
 		},
@@ -164,7 +218,9 @@ Examples:
 	},
 	{
 		Name:        CommandPull,
+		Category:    CategorySync,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[filter]", Description: "Pull repos in scope"},
 		Help: []HelpEntry{
 			{Usage: "pull [filter]", Description: "Pull repos in scope"},
 		},
@@ -172,10 +228,12 @@ Examples:
 	},
 	{
 		Name:        CommandContext,
+		Aliases:     []string{"ctx"},
+		Category:    CategoryScope,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[subcommand]", Description: "Set/show the default filter"},
 		Help: []HelpEntry{
 			{Usage: "context [filter]", Description: "Set default filter (no arg = show, " + ContextClearUsage + " = clear)"},
-			{Usage: "ctx [filter]", Description: "Alias for context"},
 			{Usage: "context set <filter>", Description: "Explicit form of context set"},
 			{Usage: "context refresh [" + WorktreesFlagUsage + "]", Description: "Re-resolve the stored context and rebuild scope"},
 			{Usage: "context . [" + WorktreesFlagUsage + "]", Description: "Shorthand for context refresh"},
@@ -210,11 +268,13 @@ Alias: ctx
 	},
 	{
 		Name:        CommandMux,
+		Category:    CategoryTools,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[subcommand]", Description: "Terminal multiplexer sessions"},
 		Help: []HelpEntry{
 			{Usage: "mux [session]", Description: "Attach or create a terminal session (tmux/zellij)"},
 			{Usage: "mux kill [session]", Description: "Kill a session"},
-			{Usage: "mux ls", Description: "List multiplexer sessions"},
+			{Usage: "mux list", Description: "List multiplexer sessions (alias: ls)"},
 			{Usage: "mux dup [window]", Description: "Duplicate a window/tab in the active session"},
 			{Usage: "mux save [--local] [session]", Description: "Save session layout to manifest"},
 		},
@@ -226,7 +286,7 @@ Subcommands:
   (no subcommand)            Attach or create the default session
   [session]                  Attach or create a named session
   kill [session]             Kill a session
-  ls                         List active sessions
+  list|ls                    List active sessions
   dup [window]               Duplicate a window/tab in the active session
   save [--local] [session]   Persist current layout to manifest
 
@@ -236,21 +296,23 @@ Sessions are configured in manifest.yml under the mux: key.
 	},
 	{
 		Name:        CommandWorktree,
+		Aliases:     []string{"wt"},
+		Category:    CategoryScope,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[subcommand]", Description: "Manage linked git worktrees"},
 		Help: []HelpEntry{
 			{Usage: "worktree add <branch> [filter]", Description: "Create worktrees across repos"},
 			{Usage: "worktree remove <branch> [filter]", Description: "Remove worktrees across repos"},
 			{Usage: "worktree list [filter]", Description: "List worktrees per repo"},
-			{Usage: "wt add <branch> [filter]", Description: "Alias for worktree"},
 		},
-		DetailedHelp: `Usage: ws worktree <subcommand> [options]
+		DetailedHelp: `Usage: ws worktree [subcommand] [options]
 
 Manage git worktrees across repos.
 
 Subcommands:
   add <branch> [filter]      Create linked worktrees for a branch
-  remove <branch> [filter]   Remove linked worktrees
-  list [filter]              List worktrees per repo
+  remove|rm <branch> [filter] Remove linked worktrees
+  list|ls [filter]           List worktrees per repo
 
 Alias: wt
 `,
@@ -258,10 +320,12 @@ Alias: wt
 	},
 	{
 		Name:        CommandAgent,
+		Category:    CategoryTools,
 		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[subcommand]", Description: "AI agent sessions (start/list/resume)"},
 		Help: []HelpEntry{
 			{Usage: "agent [--agent name] [repo] [-- args...]", Description: "Start an AI agent session"},
-			{Usage: "agent ls [-v] [-n N | --all] [filter]", Description: "List agent sessions across workspace"},
+			{Usage: "agent list [-v] [-n N | --all] [filter]", Description: "List agent sessions (alias: ls)"},
 			{Usage: "agent resume <#|id>", Description: "Resume a previous agent session"},
 		},
 		DetailedHelp: `Usage: ws agent [subcommand] [options]
@@ -269,9 +333,9 @@ Alias: wt
 Start, list, and resume AI agent sessions across workspace repos.
 
 Subcommands:
-  (default)                        Start an agent session
-  ls [-v] [-n N | --all] [filter]  List sessions across workspace
-  resume <#|id>                    Resume a previous session
+  (default)                          Start an agent session
+  list|ls [-v] [-n N|--all] [filter] List sessions
+  resume <#|id>                      Resume a previous session
 
 Start options:
   --agent, -a <name>   Select an agent profile (default: $WS_AGENT or "claude")
@@ -283,6 +347,10 @@ List options:
   -n <N>               Limit output to N sessions (default: 20)
   --all                Show all sessions
   [filter]             Filter by group or repo name
+                       Special values:
+                         .         Current directory's repo (or root)
+                         root      Only sessions started in the workspace root
+                         external  Sessions started outside this workspace
 
 Resume:
   <#>                  Numeric index from the most recent listing
@@ -332,8 +400,8 @@ func BuiltinCommandNames() []string {
 // BuiltinCommandSuggestions returns canonical command names plus shorthand aliases.
 func BuiltinCommandSuggestions() []string {
 	names := BuiltinCommandNames()
-	for _, alias := range builtinCommandAliases {
-		names = append(names, alias.Alias)
+	for _, cmd := range builtinCommands {
+		names = append(names, cmd.Aliases...)
 	}
 	return names
 }
@@ -352,9 +420,11 @@ func BuiltinUsageEntries() []HelpEntry {
 
 // ResolveBuiltinCommandName maps a shorthand alias to its canonical built-in name.
 func ResolveBuiltinCommandName(name string) string {
-	for _, alias := range builtinCommandAliases {
-		if alias.Alias == name {
-			return alias.Name
+	for _, cmd := range builtinCommands {
+		for _, alias := range cmd.Aliases {
+			if alias == name {
+				return cmd.Name
+			}
 		}
 	}
 	return name
