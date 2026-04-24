@@ -24,6 +24,7 @@ func TestBuiltinCommandNames(t *testing.T) {
 		CommandMux,
 		CommandWorktree,
 		CommandRemotes,
+		CommandRepairRefspecs,
 		CommandAgent,
 	}, BuiltinCommandNames())
 }

@@ -422,7 +422,7 @@ func AddRemote(repoDir, name, url string) error {
 // Clone clones a single repo and configures any additional (non-origin)
 // remotes declared on the repo.
 func Clone(repo manifest.RepoInfo) error {
-	cmd := exec.Command("git", "clone", "-b", repo.Branch, "--single-branch", "--", repo.URL, repo.Path)
+	cmd := exec.Command("git", "clone", "-b", repo.Branch, "--", repo.URL, repo.Path)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -490,6 +490,51 @@ func localGitIdentity(repoDir string) (string, string, error) {
 	}
 
 	return email, name, nil
+}
+
+// FetchRefspecs returns every fetch refspec configured for the given remote.
+// Returns nil when the remote has no fetch refspecs configured.
+func FetchRefspecs(repoDir, remote string) ([]string, error) {
+	key := fmt.Sprintf("remote.%s.fetch", remote)
+	cmd := exec.Command("git", "config", "--get-all", key)
+	cmd.Dir = repoDir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 && strings.TrimSpace(stderr.String()) == "" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%s: %w", strings.TrimSpace(stderr.String()), err)
+	}
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// SetDefaultFetchRefspec clears any existing fetch refspecs for the remote
+// and installs the standard wildcard "+refs/heads/*:refs/remotes/<remote>/*".
+func SetDefaultFetchRefspec(repoDir, remote string) error {
+	key := fmt.Sprintf("remote.%s.fetch", remote)
+	val := fmt.Sprintf("+refs/heads/*:refs/remotes/%s/*", remote)
+	unset := exec.Command("git", "config", "--unset-all", key)
+	unset.Dir = repoDir
+	var stderr bytes.Buffer
+	unset.Stderr = &stderr
+	if err := unset.Run(); err != nil {
+		// Exit code 5 = the variable did not exist; anything else is fatal.
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 5 {
+			return fmt.Errorf("unset %s: %s: %w", key, strings.TrimSpace(stderr.String()), err)
+		}
+	}
+	if _, err := gitCmd(repoDir, "config", "--add", key, val); err != nil {
+		return fmt.Errorf("add %s: %w", key, err)
+	}
+	return nil
 }
 
 func gitConfigValue(repoDir, key string) (string, error) {
