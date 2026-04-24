@@ -357,6 +357,16 @@ dispatch:
 			fatal(err)
 		}
 
+	case command.CommandRepairRefspecs:
+		defaultFilter, hasDefaultFilter := command.GetDefaultContextForMode(m, wsHome, false)
+		filter, err := parseOptionalFilterArg(args, defaultFilter, hasDefaultFilter, "ws repair-refspecs [filter]")
+		if err != nil {
+			fatal(err)
+		}
+		if err := command.RepairRefspecs(m, wsHome, filter); err != nil {
+			fatal(err)
+		}
+
 	case command.CommandWorktree:
 		parsed, err := parseWorktreeArgs(args)
 		if err != nil {

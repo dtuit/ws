@@ -17,6 +17,7 @@ const (
 	CommandMux      = "mux"
 	CommandWorktree = "worktree"
 	CommandRemotes  = "remotes"
+	CommandRepairRefspecs = "repair-refspecs"
 )
 
 // Category groups related commands under one heading in `ws help`.
@@ -351,6 +352,34 @@ For each repo in the filter:
 
 Never removes or renames remotes. Use when the manifest gains new remotes
 after a repo was already cloned.
+`,
+		complete: completeNoopCommand,
+	},
+	{
+		Name:        CommandRepairRefspecs,
+		Category:    CategorySync,
+		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[filter]", Description: "Restore default fetch refspec on legacy checkouts"},
+		Help: []HelpEntry{
+			{Usage: "repair-refspecs [filter]", Description: "Restore origin fetch refspec to the wildcard default"},
+		},
+		DetailedHelp: `Usage: ws repair-refspecs [filter]
+
+Older versions of ws cloned with --single-branch, which bakes a restricted
+fetch refspec into .git/config:
+
+  +refs/heads/<branch>:refs/remotes/origin/<branch>
+
+This means ` + "`git fetch`" + ` only ever pulls the single branch that was
+checked out at clone time — other branches on the remote stay invisible.
+
+This command rewrites remote.origin.fetch back to the standard wildcard
+("+refs/heads/*:refs/remotes/origin/*") for any repo that still has the
+single-branch form. Repos with non-standard custom refspecs are left alone
+and reported for manual review.
+
+Legacy tool — intended to be removed in a future release once no one has
+affected checkouts.
 `,
 		complete: completeNoopCommand,
 	},
