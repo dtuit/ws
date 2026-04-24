@@ -60,6 +60,12 @@ func RunAll(repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int, opts Ru
 	fi, _ := os.Stdout.Stat()
 	isTTY := fi != nil && fi.Mode()&os.ModeCharDevice != 0
 
+	// Force git color on; CombinedOutput() hides the TTY so git would otherwise strip ANSI codes.
+	effectiveArgs := cmdArgs
+	if term.Enabled() && len(cmdArgs) > 0 && cmdArgs[0] == "git" {
+		effectiveArgs = append([]string{"git", "-c", "color.ui=always"}, cmdArgs[1:]...)
+	}
+
 	for i, repo := range repos {
 		wg.Add(1)
 		go func(r manifest.RepoInfo, prefix string) {
@@ -75,7 +81,7 @@ func RunAll(repos []manifest.RepoInfo, cmdArgs []string, maxWorkers int, opts Ru
 				return
 			}
 
-			cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+			cmd := exec.Command(effectiveArgs[0], effectiveArgs[1:]...)
 			cmd.Dir = r.Path
 			cmd.Stdin = nil
 			if env != nil {

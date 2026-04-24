@@ -36,3 +36,8 @@ func Colorize(code, s string) string {
 func SetEnabled(on bool) {
 	enabled = on
 }
+
+// Enabled reports whether ANSI color output is currently enabled.
+func Enabled() bool {
+	return enabled
+}

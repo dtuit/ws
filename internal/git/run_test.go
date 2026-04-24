@@ -44,6 +44,43 @@ func TestExec_ColorsPassThroughPrefixes(t *testing.T) {
 	assert.Empty(t, stderr)
 }
 
+func TestExec_GitOutputCarriesAnsiWhenEnabled(t *testing.T) {
+	term.SetEnabled(true)
+	defer term.SetEnabled(false)
+
+	dir := t.TempDir()
+	repoDir := initTestRepo(t, dir, "alpha")
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "untracked.txt"), []byte("x"), 0644))
+
+	repos := []manifest.RepoInfo{{Name: "alpha", Path: filepath.Clean(repoDir)}}
+
+	stdout, _ := captureOutput(t, func() {
+		failCount := Exec(repos, []string{"git", "status"}, 1)
+		assert.Zero(t, failCount)
+	})
+
+	assert.Contains(t, stdout, "untracked.txt")
+	assert.Contains(t, stdout, "\x1b[31m", "expected red ANSI code from git for untracked file")
+}
+
+func TestExec_GitOutputHasNoAnsiWhenDisabled(t *testing.T) {
+	term.SetEnabled(false)
+
+	dir := t.TempDir()
+	repoDir := initTestRepo(t, dir, "alpha")
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "untracked.txt"), []byte("x"), 0644))
+
+	repos := []manifest.RepoInfo{{Name: "alpha", Path: filepath.Clean(repoDir)}}
+
+	stdout, _ := captureOutput(t, func() {
+		failCount := Exec(repos, []string{"git", "status"}, 1)
+		assert.Zero(t, failCount)
+	})
+
+	assert.Contains(t, stdout, "untracked.txt")
+	assert.NotContains(t, stdout, "\x1b[", "expected no ANSI codes when color disabled")
+}
+
 func TestRunAll_LeavesPrefixesPlainUnlessEnabled(t *testing.T) {
 	term.SetEnabled(true)
 	defer term.SetEnabled(false)
