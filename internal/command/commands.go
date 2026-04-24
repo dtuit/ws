@@ -8,6 +8,7 @@ const (
 	CommandSetup   = "setup"
 	CommandShell   = "shell"
 	CommandOpen    = "open"
+	CommandBrowse  = "browse"
 	CommandRepos   = "repos"
 	CommandFetch   = "fetch"
 	CommandPull    = "pull"
@@ -168,6 +169,37 @@ they return nothing on a fresh workspace.
 			{Usage: "open [--editor <name>]", Description: "Open workspace (default: code, or WS_EDITOR)"},
 		},
 		complete: completeNoopCommand,
+	},
+	{
+		Name:        CommandBrowse,
+		Category:    CategoryTools,
+		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "<repo> [-y]", Description: "Open a repo's remote URL in the default browser"},
+		Help: []HelpEntry{
+			{Usage: "browse <repo>", Description: "Open the repo's origin URL in a browser"},
+			{Usage: "browse .", Description: "Open the URL of the repo containing the current directory"},
+			{Usage: "browse <repo> [-y|--yes]", Description: "Skip the VS Code confirmation prompt"},
+		},
+		DetailedHelp: `Usage: ws browse <repo> [-y|--yes]
+
+Resolves the given repo's origin URL from the manifest, converts it
+to an https:// URL, prints it, and opens it in the default browser.
+
+If the repo is not declared in the manifest, the URL is built from
+the top-level remotes.origin prefix.
+
+If the arg is "." the repo containing the current working directory
+is used.
+
+When run inside VS Code's integrated terminal (TERM_PROGRAM=vscode)
+and stdin is a TTY, prompts before launching. Use -y to skip the
+prompt.
+
+Examples:
+  ws browse api-server
+  ws browse .
+`,
+		complete: completeBrowseCommand,
 	},
 	{
 		Name:        CommandRepos,

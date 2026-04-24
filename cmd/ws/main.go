@@ -216,6 +216,16 @@ dispatch:
 			fatal(err)
 		}
 
+	case command.CommandBrowse:
+		var opts command.BrowseOptions
+		args, opts.Yes = stripBoolFlag(args, "--yes", "-y")
+		if len(args) != 1 {
+			fatal(fmt.Errorf("usage: ws browse <repo> [-y|--yes]"))
+		}
+		if err := command.Browse(m, wsHome, args[0], opts); err != nil {
+			fatal(err)
+		}
+
 	case command.CommandRepos:
 		showAll := false
 		args, showAll = stripBoolFlag(args, "--all", "-a")

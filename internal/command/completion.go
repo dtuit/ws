@@ -112,6 +112,15 @@ func completeReposCommand(_ *manifest.Manifest, args []string, current int) Comp
 	return finalizeCompletion(append([]string{"--all", "-a"}, worktreesFlagSuggestions()...), completionWord(args, current), false)
 }
 
+func completeBrowseCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	currentWord := completionWord(args, current)
+	if current == 0 {
+		values := append([]string{".", "--yes", "-y"}, repoSuggestions(m)...)
+		return finalizeCompletion(values, currentWord, false)
+	}
+	return finalizeCompletion([]string{"--yes", "-y"}, currentWord, false)
+}
+
 func completeAgentCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
 	if current < 0 {
 		return CompletionResult{}

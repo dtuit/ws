@@ -214,6 +214,7 @@ With that loaded, `ws` completes built-in commands, filters, repo names, and fal
 | Re-resolve the saved context | `ws context refresh` |
 | Run a command across a group | `ws backend git status` |
 | Open the generated VS Code workspace | `ws open` |
+| Open a repo's remote URL in the browser | `ws browse api-server` |
 | Print the path to a repo or worktree | `ws cd api-server` |
 
 `ws open` only works after a workspace file exists, so run `ws context <filter>` first if you have not generated one yet.
@@ -244,6 +245,8 @@ ws context [filter]
                           Set or show the default filter (none/reset clears)
 ws ctx [filter]           Alias for ws context
 ws open                   Open the generated VS Code workspace
+ws browse <repo>          Open the repo's origin URL in the default browser
+                          ("." = repo containing the current directory)
 ws context refresh
                           Re-resolve the stored context
 ws context -              Swap to the previous context (like cd -)

@@ -52,7 +52,7 @@ type RepoConfig struct {
 // RepoInfo is a fully resolved repo entry.
 type RepoInfo struct {
 	Name           string
-	URL            string            // effective origin URL
+	URL            string // effective origin URL
 	Branch         string
 	Groups         []string
 	Path           string            // absolute path to repo on disk
@@ -155,11 +155,11 @@ type MuxWindow struct {
 }
 
 type rawMuxConfig struct {
-	Backend  string                    `yaml:"backend"`
-	Session  string                    `yaml:"session"`
-	Bars     *bool                     `yaml:"bars"`
-	Windows  []rawMuxWindow            `yaml:"windows"`
-	Sessions map[string]rawMuxSession  `yaml:"sessions"`
+	Backend  string                   `yaml:"backend"`
+	Session  string                   `yaml:"session"`
+	Bars     *bool                    `yaml:"bars"`
+	Windows  []rawMuxWindow           `yaml:"windows"`
+	Sessions map[string]rawMuxSession `yaml:"sessions"`
 }
 
 type rawMuxSession struct {
@@ -168,14 +168,14 @@ type rawMuxSession struct {
 }
 
 type rawMuxWindow struct {
-	Name   string         `yaml:"name"`
-	Dir    string         `yaml:"dir"`
-	Filter string         `yaml:"filter"`
-	Split  bool           `yaml:"split"`
-	Panes  int            `yaml:"panes"`
-	Cmd    stringOrList   `yaml:"cmd"`
-	Layout string         `yaml:"layout"`
-	Sizes  []int          `yaml:"sizes"`
+	Name   string       `yaml:"name"`
+	Dir    string       `yaml:"dir"`
+	Filter string       `yaml:"filter"`
+	Split  bool         `yaml:"split"`
+	Panes  int          `yaml:"panes"`
+	Cmd    stringOrList `yaml:"cmd"`
+	Layout string       `yaml:"layout"`
+	Sizes  []int        `yaml:"sizes"`
 }
 
 // stringOrList is a YAML type that accepts either a scalar string or a list of strings.
@@ -204,18 +204,18 @@ func (s *stringOrList) UnmarshalYAML(node *yaml.Node) error {
 
 // rawManifest is the YAML deserialization target.
 type rawManifest struct {
-	Root      string                       `yaml:"root"`      // where repos live
-	Workspace string                       `yaml:"workspace"` // VS Code workspace filename
-	Scopes    *[]rawScopeDir               `yaml:"scopes"`    // generated scope symlink directories
-	Worktrees    *bool                     `yaml:"worktrees"`      // default worktree behavior
-	WorktreeRoot string                    `yaml:"worktree_root"` // directory for created worktrees
-	Mux          *rawMuxConfig             `yaml:"mux"`           // terminal multiplexer config
-	Remotes   map[string]string            `yaml:"remotes"`   // named URL prefixes
-	Branch    string                       `yaml:"branch"`
-	Groups    map[string][]string          `yaml:"groups"`
-	Repos     map[string]yaml.Node         `yaml:"repos"`     // decoded per-entry to surface legacy keys
-	Exclude   []string                     `yaml:"exclude"`
-	Agents    map[string]string            `yaml:"agents"` // agent profile name → shell command
+	Root         string               `yaml:"root"`          // where repos live
+	Workspace    string               `yaml:"workspace"`     // VS Code workspace filename
+	Scopes       *[]rawScopeDir       `yaml:"scopes"`        // generated scope symlink directories
+	Worktrees    *bool                `yaml:"worktrees"`     // default worktree behavior
+	WorktreeRoot string               `yaml:"worktree_root"` // directory for created worktrees
+	Mux          *rawMuxConfig        `yaml:"mux"`           // terminal multiplexer config
+	Remotes      map[string]string    `yaml:"remotes"`       // named URL prefixes
+	Branch       string               `yaml:"branch"`
+	Groups       map[string][]string  `yaml:"groups"`
+	Repos        map[string]yaml.Node `yaml:"repos"` // decoded per-entry to surface legacy keys
+	Exclude      []string             `yaml:"exclude"`
+	Agents       map[string]string    `yaml:"agents"` // agent profile name → shell command
 }
 
 // rawRepoConfig is the per-repo YAML shape.
@@ -678,6 +678,78 @@ func (m *Manifest) ResolveRemotes(name string, cfg RepoConfig) map[string]string
 // ResolveRemotes for call-sites that only need the primary URL.
 func (m *Manifest) ResolveURL(name string, cfg RepoConfig) string {
 	return m.ResolveRemotes(name, cfg)["origin"]
+}
+
+// BrowseURL returns a browsable https URL for the given repo name. If the
+// name is declared in the manifest, its resolved origin is used; otherwise
+// the URL is built from the top-level remotes.origin prefix (as if the
+// repo were declared bare). Errors when no origin URL can be produced or
+// the URL scheme is not convertible.
+func (m *Manifest) BrowseURL(name string) (string, error) {
+	if err := ValidateName(name); err != nil {
+		return "", err
+	}
+	cfg, ok := m.Repos[name]
+	if !ok {
+		cfg = RepoConfig{}
+	}
+	clone := m.ResolveURL(name, cfg)
+	if clone == "" {
+		return "", fmt.Errorf("no origin URL for %q (set remotes.origin in the manifest, or add %s under repos:)", name, name)
+	}
+	return CloneToBrowseURL(clone)
+}
+
+// CloneToBrowseURL converts a git clone URL to an https:// URL suitable for
+// opening in a web browser.
+//
+//	git@host:org/repo.git       -> https://host/org/repo
+//	ssh://git@host/org/repo.git -> https://host/org/repo
+//	https://host/org/repo.git   -> https://host/org/repo
+func CloneToBrowseURL(clone string) (string, error) {
+	clone = strings.TrimSpace(clone)
+	if clone == "" {
+		return "", fmt.Errorf("empty URL")
+	}
+
+	// SSH shorthand: user@host:path (no "://").
+	if !strings.Contains(clone, "://") {
+		at := strings.Index(clone, "@")
+		colon := strings.Index(clone, ":")
+		if at == -1 || colon == -1 || colon < at {
+			return "", fmt.Errorf("cannot convert URL %q", clone)
+		}
+		host := clone[at+1 : colon]
+		path := clone[colon+1:]
+		return "https://" + host + "/" + trimGitAndSlash(path), nil
+	}
+
+	// scheme://[user@]host[:port]/path
+	idx := strings.Index(clone, "://")
+	rest := clone[idx+3:]
+	slash := strings.Index(rest, "/")
+	if slash == -1 {
+		return "", fmt.Errorf("cannot convert URL %q", clone)
+	}
+	authority := rest[:slash]
+	path := rest[slash+1:]
+	if at := strings.LastIndex(authority, "@"); at != -1 {
+		authority = authority[at+1:]
+	}
+	if colon := strings.Index(authority, ":"); colon != -1 {
+		authority = authority[:colon]
+	}
+	if authority == "" {
+		return "", fmt.Errorf("cannot convert URL %q", clone)
+	}
+	return "https://" + authority + "/" + trimGitAndSlash(path), nil
+}
+
+func trimGitAndSlash(path string) string {
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, ".git")
+	path = strings.TrimSuffix(path, "/")
+	return path
 }
 
 // RepoInfoFor builds a fully populated RepoInfo for the given repo.

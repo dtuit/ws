@@ -822,3 +822,67 @@ func repoNames(repos []RepoInfo) []string {
 	}
 	return names
 }
+
+func TestCloneToBrowseURL(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+		err  bool
+	}{
+		{"ssh-shorthand", "git@github.com:acme/foo.git", "https://github.com/acme/foo", false},
+		{"ssh-shorthand-no-git", "git@bitbucket.org:xtracta/xtracta-compose", "https://bitbucket.org/xtracta/xtracta-compose", false},
+		{"https-with-git", "https://bitbucket.org/xtracta/xtracta-compose.git", "https://bitbucket.org/xtracta/xtracta-compose", false},
+		{"https-trailing-slash", "https://bitbucket.org/xtracta/xtracta-compose/", "https://bitbucket.org/xtracta/xtracta-compose", false},
+		{"https-plain", "https://github.com/acme/foo", "https://github.com/acme/foo", false},
+		{"ssh-scheme", "ssh://git@github.com/acme/foo.git", "https://github.com/acme/foo", false},
+		{"git-scheme", "git://github.com/acme/foo.git", "https://github.com/acme/foo", false},
+		{"http-scheme", "http://host.local/org/repo.git", "https://host.local/org/repo", false},
+		{"ssh-with-port", "ssh://git@ssh.github.com:443/acme/foo.git", "https://ssh.github.com/acme/foo", false},
+		{"empty", "", "", true},
+		{"bad-shorthand-no-colon", "git@github.com/acme/foo.git", "", true},
+		{"bad-scheme-no-path", "https://github.com", "", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := CloneToBrowseURL(c.in)
+			if c.err {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+func TestBrowseURL(t *testing.T) {
+	m, err := Parse([]byte(testManifest))
+	require.NoError(t, err)
+
+	// Declared repo uses the top-level prefix.
+	got, err := m.BrowseURL("api-server")
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/acme-corp/api-server", got)
+
+	// Per-repo origin override wins over the top-level prefix.
+	got, err = m.BrowseURL("custom-tool")
+	require.NoError(t, err)
+	assert.Equal(t, "https://custom/org/repo", got)
+
+	// A name not in the manifest falls back to the top-level origin prefix.
+	got, err = m.BrowseURL("not-declared")
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/acme-corp/not-declared", got)
+
+	// Invalid name is rejected before URL resolution.
+	_, err = m.BrowseURL("foo/bar")
+	assert.Error(t, err)
+	_, err = m.BrowseURL(".")
+	assert.Error(t, err)
+
+	// No top-level origin and not declared -> error.
+	empty := &Manifest{Repos: map[string]RepoConfig{}, Remotes: map[string]string{}}
+	_, err = empty.BrowseURL("anything")
+	assert.Error(t, err)
+}
