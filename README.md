@@ -437,10 +437,13 @@ Field summary:
   repo (either here as a prefix or as a per-repo full URL).
 - `repos.<name>.remotes`: per-repo map of extra git remotes. Values are full URLs
   (used as-is). Merged with the top-level map; per-repo keys override.
-- `repos.<name>.default_compare`: name of the remote `ws ll` should compare
-  against alongside the branch's native upstream. Rendered next to the sync
-  symbol as `<remote>:<symbol>` (e.g. `upstream:↑3`); shows `~` until the
-  remote has been fetched.
+- `repos.<name>.default_compare`: remote (or `<remote>:<branch>`) `ws ll`
+  should compare against alongside the branch's native upstream. Bare form
+  `upstream` uses `upstream/<local-branch>` and falls back to `upstream/HEAD`
+  if that ref isn't on the remote — handy for forks where the local branch
+  has been renamed. Pinned form `upstream:main` always compares against
+  that exact ref. Rendered as `<remote>:<symbol>` (e.g. `upstream:↑3`); shows
+  `~` until the remote has been fetched.
 - `branch`: default branch for repos that do not override it
 - `root`: required; where repos live, relative to the manifest directory or absolute
 - `workspace`: filename for the generated VS Code workspace

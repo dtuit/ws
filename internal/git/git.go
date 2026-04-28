@@ -278,34 +278,50 @@ func StatusAll(repos []manifest.RepoInfo, maxWorkers int) []RepoStatus {
 }
 
 // populateCompare fills the secondary comparison fields on s by counting
-// commits between HEAD and <remote>/<branch>. No-op for detached HEAD.
-func populateCompare(s *RepoStatus, repoDir, remote string) {
+// commits between HEAD and a ref on the given remote.
+//
+// The compareSpec accepts "<remote>" or "<remote>:<branch>". When the
+// branch part is omitted, the repo's local branch is used; if that ref
+// doesn't exist on the remote, populateCompare falls back to
+// `<remote>/HEAD` (the remote's default branch). No-op for detached HEAD.
+func populateCompare(s *RepoStatus, repoDir, compareSpec string) {
+	remote, explicit := manifest.SplitDefaultCompare(compareSpec)
 	s.CompareRemote = remote
 	if s.Branch == "" || s.Branch == "(detached)" {
 		s.CompareNoRef = true
 		return
 	}
-	// rev-list --left-right --count A...B reports "<left>\t<right>" where
-	// left = commits in A not in B (ahead) and right = commits in B not in A (behind).
-	out, err := gitCmd(repoDir, "rev-list", "--left-right", "--count",
-		"HEAD..."+remote+"/"+s.Branch)
-	if err != nil {
-		s.CompareNoRef = true
+
+	// Build a candidate list of refs to try. Explicit branch wins when set;
+	// otherwise try the local branch first, then the remote's HEAD.
+	var candidates []string
+	if explicit != "" {
+		candidates = []string{remote + "/" + explicit}
+	} else {
+		candidates = []string{remote + "/" + s.Branch, remote + "/HEAD"}
+	}
+
+	for _, ref := range candidates {
+		// rev-list --left-right --count A...B reports "<left>\t<right>" where
+		// left = commits in A not in B (ahead) and right = commits in B not in A (behind).
+		out, err := gitCmd(repoDir, "rev-list", "--left-right", "--count", "HEAD..."+ref)
+		if err != nil {
+			continue
+		}
+		parts := strings.Fields(out)
+		if len(parts) != 2 {
+			continue
+		}
+		ahead, err1 := strconv.Atoi(parts[0])
+		behind, err2 := strconv.Atoi(parts[1])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		s.CompareAhead = ahead
+		s.CompareBehind = behind
 		return
 	}
-	parts := strings.Fields(out)
-	if len(parts) != 2 {
-		s.CompareNoRef = true
-		return
-	}
-	ahead, err1 := strconv.Atoi(parts[0])
-	behind, err2 := strconv.Atoi(parts[1])
-	if err1 != nil || err2 != nil {
-		s.CompareNoRef = true
-		return
-	}
-	s.CompareAhead = ahead
-	s.CompareBehind = behind
+	s.CompareNoRef = true
 }
 
 // InspectRepoActivity inspects a repo and its linked worktrees for local activity.

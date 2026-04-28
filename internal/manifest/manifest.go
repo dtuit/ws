@@ -403,7 +403,8 @@ func validateRepoRemotes(m *Manifest) error {
 			}
 		}
 		if cfg.DefaultCompare != "" {
-			if _, ok := effective[cfg.DefaultCompare]; !ok {
+			remote, _ := SplitDefaultCompare(cfg.DefaultCompare)
+			if _, ok := effective[remote]; !ok {
 				return fmt.Errorf(
 					"repo %q: default_compare %q does not match any declared remote",
 					name, cfg.DefaultCompare)
@@ -411,6 +412,16 @@ func validateRepoRemotes(m *Manifest) error {
 		}
 	}
 	return nil
+}
+
+// SplitDefaultCompare parses a default_compare value of the form
+// "<remote>" or "<remote>:<branch>" into its parts. An empty branch means
+// "use the repo's local branch (with HEAD fallback)".
+func SplitDefaultCompare(value string) (remote, branch string) {
+	if i := strings.IndexByte(value, ':'); i >= 0 {
+		return value[:i], value[i+1:]
+	}
+	return value, ""
 }
 
 // validRemoteName mirrors git's own constraints loosely: non-empty, no slashes

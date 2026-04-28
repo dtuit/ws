@@ -103,6 +103,9 @@ Compare indicator (when repo declares default_compare):
   <remote>:<sym>   Same sync symbols, but counted against
                    <remote>/<branch> (e.g. upstream:↑3). Shows ~
                    until the remote has been fetched.
+                   default_compare accepts 'upstream' (uses local
+                   branch, falls back to upstream/HEAD) or
+                   'upstream:main' (pinned ref).
 
 Colors:
   green            In sync, clean

@@ -757,6 +757,44 @@ repos:
 	assert.Contains(t, err.Error(), "no effective origin")
 }
 
+func TestParse_AcceptsDefaultCompareWithBranch(t *testing.T) {
+	m, err := Parse([]byte(`
+root: ..
+remotes:
+  origin: git@example.com:org
+repos:
+  fork:
+    branch: xtracta-main
+    remotes:
+      upstream: git@github.com:upstream/fork.git
+    default_compare: upstream:main
+`))
+	require.NoError(t, err)
+	cfg := m.Repos["fork"]
+	assert.Equal(t, "upstream:main", cfg.DefaultCompare)
+	remote, branch := SplitDefaultCompare(cfg.DefaultCompare)
+	assert.Equal(t, "upstream", remote)
+	assert.Equal(t, "main", branch)
+}
+
+func TestSplitDefaultCompare(t *testing.T) {
+	cases := []struct {
+		in           string
+		wantRemote   string
+		wantBranch   string
+	}{
+		{"", "", ""},
+		{"upstream", "upstream", ""},
+		{"upstream:main", "upstream", "main"},
+		{"upstream:feature/x", "upstream", "feature/x"},
+	}
+	for _, tc := range cases {
+		r, b := SplitDefaultCompare(tc.in)
+		assert.Equal(t, tc.wantRemote, r, tc.in)
+		assert.Equal(t, tc.wantBranch, b, tc.in)
+	}
+}
+
 func TestParse_RejectsUnknownDefaultCompare(t *testing.T) {
 	_, err := Parse([]byte(`
 root: ..
