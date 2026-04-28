@@ -66,6 +66,10 @@ func SyncRepoRemotes(repos []manifest.RepoInfo) (added, warned, skipped int) {
 				}
 				fmt.Printf("  %s: added %s %s\n", repo.Name, name, want)
 				added++
+				if err := git.FetchRemote(repo.Path, name); err != nil {
+					// Non-fatal: the remote is configured; fetch can be retried.
+					fmt.Fprintf(os.Stderr, "  warning: fetch %s failed: %v\n", name, err)
+				}
 				continue
 			}
 			if got != want {

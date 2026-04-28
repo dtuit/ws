@@ -499,8 +499,18 @@ func AddRemote(repoDir, name, url string) error {
 	return err
 }
 
-// Clone clones a single repo and configures any additional (non-origin)
-// remotes declared on the repo.
+// FetchRemote runs `git fetch --prune <name>` in the repo directory,
+// streaming output to stdout/stderr so users see progress.
+func FetchRemote(repoDir, name string) error {
+	cmd := exec.Command("git", "-C", repoDir, "fetch", "--prune", name)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// Clone clones a single repo, configures any additional (non-origin)
+// remotes declared on the repo, and fetches each so refs are populated
+// for ll comparisons and `ws fetch`.
 func Clone(repo manifest.RepoInfo) error {
 	cmd := exec.Command("git", "clone", "-b", repo.Branch, "--", repo.URL, repo.Path)
 	cmd.Stdout = os.Stdout
@@ -512,11 +522,12 @@ func Clone(repo manifest.RepoInfo) error {
 		if name == "origin" {
 			continue
 		}
-		add := exec.Command("git", "-C", repo.Path, "remote", "add", name, url)
-		add.Stdout = os.Stdout
-		add.Stderr = os.Stderr
-		if err := add.Run(); err != nil {
+		if err := AddRemote(repo.Path, name, url); err != nil {
 			return fmt.Errorf("add remote %s: %w", name, err)
+		}
+		if err := FetchRemote(repo.Path, name); err != nil {
+			// Non-fatal: the remote is configured; fetch can be retried.
+			fmt.Fprintf(os.Stderr, "  warning: fetch %s failed: %v\n", name, err)
 		}
 	}
 	return nil
