@@ -82,6 +82,37 @@ var builtinCommands = []BuiltinCommand{
 Show a dashboard of repo status: branch, dirty state, sync status,
 and last commit message.
 
+Output format:
+  <name>  <branch>  <sync>  [<dirty>]  [<remote>:<sync>]  <commit msg> (<age>)
+
+Sync symbols (vs the branch's upstream):
+  =                In sync with upstream
+  ↑N               N commits ahead
+  ↓N               N commits behind
+  N⇕M              N ahead, M behind (diverged)
+  ~                No upstream tracking branch configured
+
+Dirty symbols (inside the [...] brackets):
+  +                Staged changes
+  *                Unstaged working-tree changes
+  ?                Untracked files
+  $                Stash entries exist
+  (empty)          Clean working tree
+
+Compare indicator (when repo declares default_compare):
+  <remote>:<sym>   Same sync symbols, but counted against
+                   <remote>/<branch> (e.g. upstream:↑3). Shows ~
+                   until the remote has been fetched.
+
+Colors:
+  green            In sync, clean
+  yellow           Behind upstream, or dirty working tree
+  magenta          Ahead of upstream
+  red              Diverged from upstream, or detached HEAD
+  cyan             No upstream tracking branch
+  The compare indicator feeds the same colors, so a repo diverged
+  from its compare remote turns red even when origin is in sync.
+
 Options:
   -b, --branches     Show all local branches instead of just current
   -t, --worktrees    Expand filters to include linked worktrees
