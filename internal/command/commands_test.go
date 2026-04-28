@@ -14,6 +14,7 @@ func TestBuiltinCommandNames(t *testing.T) {
 		CommandCD,
 		CommandSetup,
 		CommandShell,
+		CommandUpgrade,
 		CommandOpen,
 		CommandBrowse,
 		CommandRepos,
