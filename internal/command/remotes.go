@@ -22,7 +22,29 @@ func RemotesSync(m *manifest.Manifest, wsHome, filter string) error {
 		return nil
 	}
 
-	var added, warned, skipped int
+	added, warned, skipped := SyncRepoRemotes(repos)
+
+	switch {
+	case added == 0 && warned == 0:
+		fmt.Println("Remotes already in sync.")
+	default:
+		fmt.Printf("Synced %d remote(s)", added)
+		if warned > 0 {
+			fmt.Printf("; %d divergence warning(s)", warned)
+		}
+		fmt.Println(".")
+	}
+	if skipped > 0 {
+		fmt.Printf("Skipped %d uncloned repo(s).\n", skipped)
+	}
+	return nil
+}
+
+// SyncRepoRemotes performs the per-repo reconciliation without printing a
+// summary, returning (added, warned, skipped) counts. Useful when another
+// command (e.g. Setup) wants to embed the reconcile pass without the
+// standalone summary line.
+func SyncRepoRemotes(repos []manifest.RepoInfo) (added, warned, skipped int) {
 	for _, repo := range repos {
 		if !git.IsCheckout(repo.Path) {
 			skipped++
@@ -53,19 +75,5 @@ func RemotesSync(m *manifest.Manifest, wsHome, filter string) error {
 			}
 		}
 	}
-
-	switch {
-	case added == 0 && warned == 0:
-		fmt.Println("Remotes already in sync.")
-	default:
-		fmt.Printf("Synced %d remote(s)", added)
-		if warned > 0 {
-			fmt.Printf("; %d divergence warning(s)", warned)
-		}
-		fmt.Println(".")
-	}
-	if skipped > 0 {
-		fmt.Printf("Skipped %d uncloned repo(s).\n", skipped)
-	}
-	return nil
+	return added, warned, skipped
 }

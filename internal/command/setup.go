@@ -40,6 +40,11 @@ func Setup(m *manifest.Manifest, wsHome, filter string) (int, error) {
 		cloned++
 	}
 
+	// Reconcile remotes on already-cloned repos (newly-cloned ones are already
+	// configured by Clone). Non-destructive: adds missing remotes, warns on
+	// URL drift. The standalone `ws remotes sync` reuses the same helper.
+	addedRemotes, _, _ := SyncRepoRemotes(repos)
+
 	total := 0
 	for _, repo := range m.AllRepos(wsHome) {
 		if git.IsCheckout(repo.Path) {
@@ -49,6 +54,9 @@ func Setup(m *manifest.Manifest, wsHome, filter string) (int, error) {
 
 	if cloned > 0 {
 		fmt.Printf("Cloned %d repo(s).\n", cloned)
+	}
+	if addedRemotes > 0 {
+		fmt.Printf("Added %d remote(s) to existing repos.\n", addedRemotes)
 	}
 	fmt.Printf("Setup complete: %d repo(s) on disk.\n", total)
 
