@@ -118,6 +118,9 @@ func printLLStatusLine(s git.RepoStatus, maxName, maxBranch, termWidth int, work
 	if showEmptySymbols || symbols != "" {
 		statusText += fmt.Sprintf("[%s]", fmt.Sprintf("%-4s", symbols))
 	}
+	if cmp := s.CompareSymbol(); cmp != "" {
+		statusText += fmt.Sprintf(" %s:%s", s.CompareRemote, cmp)
+	}
 
 	ageSuffix := ""
 	if s.CommitAge != "" {
@@ -146,14 +149,18 @@ func printLLStatusLine(s git.RepoStatus, maxName, maxBranch, termWidth int, work
 }
 
 func llStatusColor(s git.RepoStatus) string {
+	cmpAhead, cmpBehind := s.CompareAhead, s.CompareBehind
+	if s.CompareRemote == "" || s.CompareNoRef {
+		cmpAhead, cmpBehind = 0, 0
+	}
 	switch {
 	case s.Branch == "(detached)":
 		return term.Red
-	case s.Ahead > 0 && s.Behind > 0:
+	case (s.Ahead > 0 && s.Behind > 0) || (cmpAhead > 0 && cmpBehind > 0):
 		return term.Red
-	case s.Ahead > 0:
+	case s.Ahead > 0 || cmpAhead > 0:
 		return term.Magenta
-	case s.Behind > 0:
+	case s.Behind > 0 || cmpBehind > 0:
 		return term.Yellow
 	case s.IsDirty():
 		return term.Yellow

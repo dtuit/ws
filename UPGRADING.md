@@ -16,9 +16,10 @@ but mechanical.
    origin, set `repos.<name>.remotes.origin` directly.
 4. New per-repo field: `remotes` — a map of `name → full URL` for extra git
    remotes. Merged with the top-level remotes map; per-repo wins on conflict.
-5. New per-repo field: `default_compare` — the name of the remote `ws ll` will
-   compare against. Parsed and validated today; full dashboard wiring lands in
-   a follow-up.
+5. New per-repo field: `default_compare` — the name of the remote `ws ll`
+   should compare against in addition to the branch's native upstream. Renders
+   as `<remote>:<symbol>` (e.g. `upstream:↑3`) next to the existing sync
+   symbol. Shows `~` until the remote has been fetched.
 
 ### Before / after
 

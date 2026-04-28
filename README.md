@@ -437,8 +437,10 @@ Field summary:
   repo (either here as a prefix or as a per-repo full URL).
 - `repos.<name>.remotes`: per-repo map of extra git remotes. Values are full URLs
   (used as-is). Merged with the top-level map; per-repo keys override.
-- `repos.<name>.default_compare`: name of the remote `ll` should compare against
-  (parsed today; full `ll` wiring lands in a follow-up).
+- `repos.<name>.default_compare`: name of the remote `ws ll` should compare
+  against alongside the branch's native upstream. Rendered next to the sync
+  symbol as `<remote>:<symbol>` (e.g. `upstream:↑3`); shows `~` until the
+  remote has been fetched.
 - `branch`: default branch for repos that do not override it
 - `root`: required; where repos live, relative to the manifest directory or absolute
 - `workspace`: filename for the generated VS Code workspace
