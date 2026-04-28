@@ -65,6 +65,16 @@ dispatch:
 			return
 		}
 	}
+	if cmd == command.CommandUpgrade {
+		args, _ = stripBoolFlag(args, "--check")
+		if len(args) > 0 {
+			fatal(fmt.Errorf("usage: ws upgrade [--check]"))
+		}
+		if err := command.UpgradeCheck(); err != nil {
+			fatal(err)
+		}
+		return
+	}
 
 	// Per-command help: ws <cmd> --help / ws <cmd> -h / ws <cmd> help
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {

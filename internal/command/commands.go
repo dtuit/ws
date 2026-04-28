@@ -19,6 +19,7 @@ const (
 	CommandWorktree = "worktree"
 	CommandRemotes  = "remotes"
 	CommandRepairRefspecs = "repair-refspecs"
+	CommandUpgrade  = "upgrade"
 )
 
 // Category groups related commands under one heading in `ws help`.
@@ -194,6 +195,25 @@ they return nothing on a fresh workspace.
 			{Usage: "shell install", Description: "Write shell config for ws cd and completion"},
 		},
 		complete: completeShellCommand,
+	},
+	{
+		Name:        CommandUpgrade,
+		Category:    CategoryInstall,
+		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[--check]", Description: "Check for a newer ws release"},
+		Help: []HelpEntry{
+			{Usage: "upgrade [--check]", Description: "Compare current version with the latest GitHub release"},
+		},
+		DetailedHelp: `Usage: ws upgrade [--check]
+
+Query the GitHub Releases API for the latest ws release and compare it
+with the running binary. Prints a one-line summary plus, when out of
+date, the install command users already use to upgrade.
+
+--check is currently the only mode and the default; --apply will be
+added in a future release.
+`,
+		complete: completeNoopCommand,
 	},
 	{
 		Name:        CommandOpen,
