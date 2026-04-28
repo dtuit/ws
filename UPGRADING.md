@@ -16,9 +16,14 @@ but mechanical.
    origin, set `repos.<name>.remotes.origin` directly.
 4. New per-repo field: `remotes` — a map of `name → full URL` for extra git
    remotes. Merged with the top-level remotes map; per-repo wins on conflict.
-5. New per-repo field: `default_compare` — the name of the remote `ws ll` will
-   compare against. Parsed and validated today; full dashboard wiring lands in
-   a follow-up.
+5. New per-repo field: `default_compare` — the remote `ws ll` should compare
+   against in addition to the branch's native upstream. Two forms:
+     - `default_compare: upstream` — compare against `upstream/<local-branch>`,
+       falling back to `upstream/HEAD` if the local-named branch isn't on the
+       remote (covers fork-of-mainline cases like `xtracta-main` → `main`).
+     - `default_compare: upstream:main` — pin to a specific upstream branch.
+   Renders as `<remote>:<symbol>` (e.g. `upstream:↑3`) next to the existing
+   sync symbol; shows `~` until the remote has been fetched.
 
 ### Before / after
 

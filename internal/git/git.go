@@ -25,9 +25,15 @@ type RepoStatus struct {
 	Ahead     int  // commits ahead of upstream
 	Behind    int  // commits behind upstream
 	NoRemote  bool // no upstream tracking branch
-	CommitMsg string
-	CommitAge string
-	Err       error
+	// Optional secondary comparison against repo.DefaultCompare. Populated
+	// only when the repo declares default_compare in the manifest.
+	CompareRemote string // remote name (e.g. "upstream"); empty when unset
+	CompareAhead  int
+	CompareBehind int
+	CompareNoRef  bool // true when <CompareRemote>/<Branch> ref isn't present locally
+	CommitMsg     string
+	CommitAge     string
+	Err           error
 }
 
 // LocalBranchInfo holds metadata for one local branch in a checkout.
@@ -85,6 +91,27 @@ func (s RepoStatus) SyncSymbol() string {
 		return fmt.Sprintf("↑%d", s.Ahead)
 	case s.Behind > 0:
 		return fmt.Sprintf("↓%d", s.Behind)
+	default:
+		return "="
+	}
+}
+
+// CompareSymbol returns the secondary sync indicator for repo.DefaultCompare.
+// Empty string when no comparison is configured.
+func (s RepoStatus) CompareSymbol() string {
+	if s.CompareRemote == "" {
+		return ""
+	}
+	if s.CompareNoRef {
+		return "~"
+	}
+	switch {
+	case s.CompareAhead > 0 && s.CompareBehind > 0:
+		return fmt.Sprintf("%d⇕%d", s.CompareAhead, s.CompareBehind)
+	case s.CompareAhead > 0:
+		return fmt.Sprintf("↑%d", s.CompareAhead)
+	case s.CompareBehind > 0:
+		return fmt.Sprintf("↓%d", s.CompareBehind)
 	default:
 		return "="
 	}
@@ -224,7 +251,9 @@ func Workers(repoCount int) int {
 	return cpus
 }
 
-// StatusAll queries git status for multiple repos in parallel.
+// StatusAll queries git status for multiple repos in parallel. Repos with a
+// non-empty DefaultCompare get an extra ahead/behind comparison against
+// <DefaultCompare>/<branch>.
 func StatusAll(repos []manifest.RepoInfo, maxWorkers int) []RepoStatus {
 	results := make([]RepoStatus, len(repos))
 	sem := make(chan struct{}, maxWorkers)
@@ -236,12 +265,63 @@ func StatusAll(repos []manifest.RepoInfo, maxWorkers int) []RepoStatus {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[idx] = Status(r.Path, r.Name)
+			s := Status(r.Path, r.Name)
+			if s.Err == nil && r.DefaultCompare != "" {
+				populateCompare(&s, r.Path, r.DefaultCompare)
+			}
+			results[idx] = s
 		}(i, repo)
 	}
 
 	wg.Wait()
 	return results
+}
+
+// populateCompare fills the secondary comparison fields on s by counting
+// commits between HEAD and a ref on the given remote.
+//
+// The compareSpec accepts "<remote>" or "<remote>:<branch>". When the
+// branch part is omitted, the repo's local branch is used; if that ref
+// doesn't exist on the remote, populateCompare falls back to
+// `<remote>/HEAD` (the remote's default branch). No-op for detached HEAD.
+func populateCompare(s *RepoStatus, repoDir, compareSpec string) {
+	remote, explicit := manifest.SplitDefaultCompare(compareSpec)
+	s.CompareRemote = remote
+	if s.Branch == "" || s.Branch == "(detached)" {
+		s.CompareNoRef = true
+		return
+	}
+
+	// Build a candidate list of refs to try. Explicit branch wins when set;
+	// otherwise try the local branch first, then the remote's HEAD.
+	var candidates []string
+	if explicit != "" {
+		candidates = []string{remote + "/" + explicit}
+	} else {
+		candidates = []string{remote + "/" + s.Branch, remote + "/HEAD"}
+	}
+
+	for _, ref := range candidates {
+		// rev-list --left-right --count A...B reports "<left>\t<right>" where
+		// left = commits in A not in B (ahead) and right = commits in B not in A (behind).
+		out, err := gitCmd(repoDir, "rev-list", "--left-right", "--count", "HEAD..."+ref)
+		if err != nil {
+			continue
+		}
+		parts := strings.Fields(out)
+		if len(parts) != 2 {
+			continue
+		}
+		ahead, err1 := strconv.Atoi(parts[0])
+		behind, err2 := strconv.Atoi(parts[1])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		s.CompareAhead = ahead
+		s.CompareBehind = behind
+		return
+	}
+	s.CompareNoRef = true
 }
 
 // InspectRepoActivity inspects a repo and its linked worktrees for local activity.
@@ -419,8 +499,18 @@ func AddRemote(repoDir, name, url string) error {
 	return err
 }
 
-// Clone clones a single repo and configures any additional (non-origin)
-// remotes declared on the repo.
+// FetchRemote runs `git fetch --prune <name>` in the repo directory,
+// streaming output to stdout/stderr so users see progress.
+func FetchRemote(repoDir, name string) error {
+	cmd := exec.Command("git", "-C", repoDir, "fetch", "--prune", name)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// Clone clones a single repo, configures any additional (non-origin)
+// remotes declared on the repo, and fetches each so refs are populated
+// for ll comparisons and `ws fetch`.
 func Clone(repo manifest.RepoInfo) error {
 	cmd := exec.Command("git", "clone", "-b", repo.Branch, "--", repo.URL, repo.Path)
 	cmd.Stdout = os.Stdout
@@ -432,11 +522,12 @@ func Clone(repo manifest.RepoInfo) error {
 		if name == "origin" {
 			continue
 		}
-		add := exec.Command("git", "-C", repo.Path, "remote", "add", name, url)
-		add.Stdout = os.Stdout
-		add.Stderr = os.Stderr
-		if err := add.Run(); err != nil {
+		if err := AddRemote(repo.Path, name, url); err != nil {
 			return fmt.Errorf("add remote %s: %w", name, err)
+		}
+		if err := FetchRemote(repo.Path, name); err != nil {
+			// Non-fatal: the remote is configured; fetch can be retried.
+			fmt.Fprintf(os.Stderr, "  warning: fetch %s failed: %v\n", name, err)
 		}
 	}
 	return nil

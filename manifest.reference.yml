@@ -219,6 +219,14 @@ groups:
 #       upstream: git@github.com:open-source-org/upstream-lib.git
 #     default_compare: upstream
 #
+# default_compare can pin a specific upstream branch when the local branch
+# name doesn't exist on the remote (e.g. a renamed fork branch):
+#   bifrost:
+#     branch: xtracta-main
+#     remotes:
+#       upstream: git@github.com:maximhq/bifrost.git
+#     default_compare: upstream:main      # or just `upstream` to use upstream/HEAD
+#
 # Override the origin URL entirely (replaces the prefix-based default):
 #   custom-tool:
 #     remotes:

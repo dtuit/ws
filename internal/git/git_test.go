@@ -347,6 +347,184 @@ func TestSyncSymbol_Diverged(t *testing.T) {
 	assert.Equal(t, "1⇕2", s.SyncSymbol())
 }
 
+func TestCompareSymbol_Empty(t *testing.T) {
+	s := RepoStatus{}
+	assert.Equal(t, "", s.CompareSymbol())
+}
+
+func TestCompareSymbol_NoRef(t *testing.T) {
+	s := RepoStatus{CompareRemote: "upstream", CompareNoRef: true}
+	assert.Equal(t, "~", s.CompareSymbol())
+}
+
+func TestCompareSymbol_AheadBehindDiverged(t *testing.T) {
+	cases := []struct {
+		s    RepoStatus
+		want string
+	}{
+		{RepoStatus{CompareRemote: "upstream"}, "="},
+		{RepoStatus{CompareRemote: "upstream", CompareAhead: 3}, "↑3"},
+		{RepoStatus{CompareRemote: "upstream", CompareBehind: 2}, "↓2"},
+		{RepoStatus{CompareRemote: "upstream", CompareAhead: 1, CompareBehind: 2}, "1⇕2"},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, tc.s.CompareSymbol())
+	}
+}
+
+func TestStatusAll_PopulatesCompare(t *testing.T) {
+	dir := t.TempDir()
+
+	upstream := initTestRepo(t, dir, "upstream-src")
+
+	// Clone fork from upstream so they share history (the realistic setup).
+	fork := filepath.Join(dir, "fork")
+	cmd := exec.Command("git", "clone", upstream, fork)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "clone failed: %s", out)
+
+	// git clone names the source remote "origin"; rename it to "upstream"
+	// so the comparison resolves against upstream/master.
+	for _, args := range [][]string{
+		{"git", "remote", "rename", "origin", "upstream"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = fork
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "cmd %v failed: %s", args, out)
+	}
+
+	// Diverge: 2 new commits on fork, 1 new commit on upstream.
+	commitEmptyAt(t, fork, "fork-1", "Test", "test@test.com", time.Now())
+	commitEmptyAt(t, fork, "fork-2", "Test", "test@test.com", time.Now())
+	commitEmptyAt(t, upstream, "upstream-1", "Test", "test@test.com", time.Now())
+	cmd = exec.Command("git", "fetch", "upstream")
+	cmd.Dir = fork
+	out, err = cmd.CombinedOutput()
+	require.NoError(t, err, "fetch failed: %s", out)
+
+	results := StatusAll([]manifest.RepoInfo{
+		{Name: "fork", Path: fork, DefaultCompare: "upstream"},
+	}, 1)
+	require.Len(t, results, 1)
+	s := results[0]
+	require.NoError(t, s.Err)
+	assert.Equal(t, "upstream", s.CompareRemote)
+	assert.False(t, s.CompareNoRef)
+	assert.Equal(t, 2, s.CompareAhead)
+	assert.Equal(t, 1, s.CompareBehind)
+	assert.Equal(t, "2⇕1", s.CompareSymbol())
+}
+
+func TestStatusAll_CompareNoRefWhenRemoteMissing(t *testing.T) {
+	dir := t.TempDir()
+	repoDir := initTestRepo(t, dir, "lonely")
+
+	results := StatusAll([]manifest.RepoInfo{
+		{Name: "lonely", Path: repoDir, DefaultCompare: "upstream"},
+	}, 1)
+	require.Len(t, results, 1)
+	s := results[0]
+	require.NoError(t, s.Err)
+	assert.Equal(t, "upstream", s.CompareRemote)
+	assert.True(t, s.CompareNoRef)
+	assert.Equal(t, "~", s.CompareSymbol())
+}
+
+func TestStatusAll_CompareExplicitBranch(t *testing.T) {
+	dir := t.TempDir()
+	upstream := initTestRepo(t, dir, "upstream-src")
+
+	fork := filepath.Join(dir, "fork")
+	cmd := exec.Command("git", "clone", upstream, fork)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "clone failed: %s", out)
+
+	for _, args := range [][]string{
+		{"git", "remote", "rename", "origin", "upstream"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		// Local fork is on a divergent branch name (mirrors xtracta/bifrost).
+		{"git", "checkout", "-b", "xtracta-main"},
+	} {
+		c := exec.Command(args[0], args[1:]...)
+		c.Dir = fork
+		out, err := c.CombinedOutput()
+		require.NoError(t, err, "cmd %v failed: %s", args, out)
+	}
+
+	commitEmptyAt(t, fork, "fork-1", "Test", "test@test.com", time.Now())
+	commitEmptyAt(t, upstream, "upstream-1", "Test", "test@test.com", time.Now())
+	c := exec.Command("git", "fetch", "upstream")
+	c.Dir = fork
+	out, err = c.CombinedOutput()
+	require.NoError(t, err, "fetch failed: %s", out)
+
+	// Explicit form: pin the compare branch to upstream's master regardless of
+	// the local branch name.
+	results := StatusAll([]manifest.RepoInfo{
+		{Name: "fork", Path: fork, DefaultCompare: "upstream:master"},
+	}, 1)
+	require.Len(t, results, 1)
+	s := results[0]
+	require.NoError(t, s.Err)
+	assert.Equal(t, "upstream", s.CompareRemote)
+	assert.False(t, s.CompareNoRef)
+	assert.Equal(t, 1, s.CompareAhead)
+	assert.Equal(t, 1, s.CompareBehind)
+}
+
+func TestStatusAll_CompareFallsBackToRemoteHEAD(t *testing.T) {
+	dir := t.TempDir()
+	upstream := initTestRepo(t, dir, "upstream-src")
+
+	fork := filepath.Join(dir, "fork")
+	cmd := exec.Command("git", "clone", upstream, fork)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "clone failed: %s", out)
+
+	for _, args := range [][]string{
+		{"git", "remote", "rename", "origin", "upstream"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "checkout", "-b", "xtracta-main"},
+	} {
+		c := exec.Command(args[0], args[1:]...)
+		c.Dir = fork
+		out, err := c.CombinedOutput()
+		require.NoError(t, err, "cmd %v failed: %s", args, out)
+	}
+
+	commitEmptyAt(t, fork, "fork-1", "Test", "test@test.com", time.Now())
+	commitEmptyAt(t, upstream, "upstream-1", "Test", "test@test.com", time.Now())
+
+	// Set remote HEAD so the fallback has somewhere to resolve to.
+	for _, args := range [][]string{
+		{"git", "fetch", "upstream"},
+		{"git", "remote", "set-head", "upstream", "master"},
+	} {
+		c := exec.Command(args[0], args[1:]...)
+		c.Dir = fork
+		out, err := c.CombinedOutput()
+		require.NoError(t, err, "cmd %v failed: %s", args, out)
+	}
+
+	// Bare form: remote/<local-branch> doesn't exist (xtracta-main isn't on
+	// upstream), so populateCompare should fall back to upstream/HEAD.
+	results := StatusAll([]manifest.RepoInfo{
+		{Name: "fork", Path: fork, DefaultCompare: "upstream"},
+	}, 1)
+	require.Len(t, results, 1)
+	s := results[0]
+	require.NoError(t, s.Err)
+	assert.Equal(t, "upstream", s.CompareRemote)
+	assert.False(t, s.CompareNoRef)
+	assert.Equal(t, 1, s.CompareAhead)
+	assert.Equal(t, 1, s.CompareBehind)
+}
+
 func TestStatusAll_Parallel(t *testing.T) {
 	dir := t.TempDir()
 
