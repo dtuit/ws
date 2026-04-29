@@ -229,6 +229,12 @@ elif [ -n "${ZSH_VERSION:-}" ]; then
     autoload -Uz compinit
     compinit
   fi
+  # Scope-limited zstyles so ws shows group headings + descriptions without
+  # touching the user's other completions. group-name '' tells zsh to use
+  # each tag (the labels passed to _describe) as the section heading.
+  zstyle ':completion:*:*:ws:*' group-name ''
+  zstyle ':completion:*:*:ws:*:descriptions' format '%%B%%d%%b'
+  zstyle ':completion:*:*:ws:*' list-grouped true
   compdef _ws_complete_zsh ws
 fi
 `, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel)
