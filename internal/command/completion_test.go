@@ -1,6 +1,7 @@
 package command
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,6 +93,74 @@ func TestCompleteShellIncludesSubcommands(t *testing.T) {
 	result := Complete(nil, []string{"shell", ""}, 1)
 	assert.Contains(t, result.Values, "init")
 	assert.Contains(t, result.Values, "install")
+	assert.Equal(t, GroupSubcommands, result.Groups["init"])
+	assert.NotEmpty(t, result.Descriptions["init"])
+	assert.NotEmpty(t, result.Descriptions["install"])
+}
+
+func TestCompleteFiltersAreGroupedByCategory(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a, repo-b, repo-c, repo-d]
+repos:
+  repo-a:
+  repo-b:
+  repo-c:
+  repo-d:
+`)
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"ll", ""}, 1)
+	// Filter tokens, groups, repos, and flags should each carry their own
+	// group label so zsh can _describe them separately.
+	assert.Equal(t, GroupFilters, result.Groups["all"])
+	assert.Equal(t, GroupGroups, result.Groups["ai"])
+	assert.Equal(t, GroupRepos, result.Groups["repo-a"])
+	assert.Equal(t, GroupFlags, result.Groups["--branches"])
+	// Group description summarises members.
+	assert.Contains(t, result.Descriptions["ai"], "repo-a")
+	assert.Contains(t, result.Descriptions["ai"], "+1 more")
+}
+
+func TestCompletionOutput_GroupedFormat(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+
+	lines := CompletionOutput(m, []string{"ll", ""}, 1)
+	require.NotEmpty(t, lines)
+	for _, line := range lines {
+		// Each line must be 3 tab-separated fields.
+		fields := strings.Split(line, "\t")
+		assert.Len(t, fields, 3, "line should have 3 fields: %q", line)
+	}
+}
+
+func TestCompletionOutput_FallbackSentinelStillSingleLine(t *testing.T) {
+	// "ws git " — single sentinel line, either fallback or delegate form.
+	lines := CompletionOutput(nil, []string{"git", ""}, 1)
+	require.Len(t, lines, 1)
+	assert.True(t,
+		lines[0] == CompletionCommandFallbackSentinel ||
+			strings.HasPrefix(lines[0], CompletionCommandFallbackSentinel+":"),
+		"expected sentinel, got %q", lines[0])
+	assert.NotContains(t, lines[0], "\t", "sentinel must stay single-field")
+}
+
+func TestCompleteTopLevelMarksFlagsAndCommands(t *testing.T) {
+	result := Complete(nil, []string{""}, 0)
+	assert.Equal(t, GroupFlags, result.Groups["-w"])
+	assert.Equal(t, GroupSubcommands, result.Groups["ll"])
+	// Commands lift their summary description.
+	assert.NotEmpty(t, result.Descriptions["ll"])
 }
 
 func TestCompleteUpgradeSuggestsCheckFlag(t *testing.T) {

@@ -102,7 +102,7 @@ _ws_delegate_bash() {
 }
 
 _ws_complete_bash() {
-  local cur prev delegate_start
+  local cur prev delegate_start line value
   local -a completions
   COMPREPLY=()
   completions=()
@@ -127,7 +127,13 @@ _ws_complete_bash() {
     COMPREPLY=( $(compgen -c -- "$cur" | sort -u) )
     return 0
   fi
-  COMPREPLY=( "${completions[@]}" )
+  # Each completion line is "<group>\t<value>\t<desc>"; bash only renders
+  # values, so strip to the second field.
+  for line in "${completions[@]}"; do
+    value="${line#*$'\t'}"
+    value="${value%%$'\t'*}"
+    COMPREPLY+=( "$value" )
+  done
 }
 
 _ws_delegate_zsh() {
@@ -171,9 +177,57 @@ _ws_complete_zsh() {
     _command_names
     return
   fi
-  if (( ${#completions[@]} > 0 )); then
-    compadd -- "${completions[@]}"
+  if (( ${#completions[@]} == 0 )); then
+    return
   fi
+
+  # Each line is "<group>\t<value>\t<desc>". Bucket by group, then call
+  # _describe per group so zsh renders headings + descriptions. Empty group
+  # falls into a no-heading bucket rendered last via plain compadd.
+  local -A _ws_buckets
+  local -a _ws_order
+  local line group value desc rest
+  for line in "${completions[@]}"; do
+    group="${line%%$'\t'*}"
+    rest="${line#*$'\t'}"
+    value="${rest%%$'\t'*}"
+    desc="${rest#*$'\t'}"
+    [[ "$desc" == "$value" ]] && desc=""
+
+    if [[ -z "${_ws_buckets[$group]+x}" ]]; then
+      _ws_order+=("$group")
+    fi
+    if [[ -n "$desc" ]]; then
+      _ws_buckets[$group]+="${value}"$'\x1f'"${desc}"$'\n'
+    else
+      _ws_buckets[$group]+="${value}"$'\x1f'$'\n'
+    fi
+  done
+
+  for group in "${_ws_order[@]}"; do
+    local -a _ws_items _ws_pairs
+    _ws_items=()
+    _ws_pairs=()
+    local entry v d
+    while IFS= read -r entry; do
+      [[ -z "$entry" ]] && continue
+      v="${entry%%$'\x1f'*}"
+      d="${entry#*$'\x1f'}"
+      [[ "$d" == "$entry" ]] && d=""
+      _ws_items+=("$v")
+      if [[ -n "$d" ]]; then
+        _ws_pairs+=("$v:$d")
+      else
+        _ws_pairs+=("$v")
+      fi
+    done <<< "${_ws_buckets[$group]}"
+
+    if [[ -z "$group" ]]; then
+      compadd -- "${_ws_items[@]}"
+    else
+      _describe -t "$group" "$group" _ws_pairs
+    fi
+  done
 }
 
 if [ -n "${BASH_VERSION:-}" ]; then
