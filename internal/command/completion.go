@@ -498,30 +498,67 @@ func completeContextCommand(m *manifest.Manifest, args []string, current int) Co
 		nonFlags = append(nonFlags, arg)
 	}
 
+	subcommands := []struct{ name, desc string }{
+		{"set", "Set the default filter scope"},
+		{"add", "Extend the current context"},
+		{"remove", "Remove repos from the current context"},
+		{"refresh", "Re-resolve and rebuild scope symlinks"},
+		{".", "Shorthand for refresh"},
+		{"save", "Persist the current context as a named group"},
+		{"none", "Clear the context"},
+		{"reset", "Clear the context"},
+		{"-", "Swap to the previous context"},
+		{"prev", "Swap to the previous context"},
+	}
+
 	if len(nonFlags) == 0 {
-		values := append(flags, filterSuggestions(m)...)
-		values = append(values, "none", "reset", "add", "remove", "save", "refresh", ".", "-", "prev")
-		return finalizeCompletion(values, currentWord, false)
+		filterValues, fGroups, fDescs := filterSuggestionsWithMeta(m)
+		values := append([]string{}, flags...)
+		for _, sc := range subcommands {
+			values = append(values, sc.name)
+		}
+		values = append(values, filterValues...)
+
+		groups := map[string]string{}
+		descriptions := map[string]string{}
+		for _, f := range flags {
+			groups[f] = GroupFlags
+		}
+		descriptions["-t"] = "Include linked worktrees"
+		descriptions["--worktrees"] = "Include linked worktrees"
+		descriptions["--no-worktrees"] = "Force primary checkouts only"
+		for _, sc := range subcommands {
+			groups[sc.name] = GroupSubcommands
+			descriptions[sc.name] = sc.desc
+		}
+		for k, v := range fGroups {
+			groups[k] = v
+		}
+		for k, v := range fDescs {
+			descriptions[k] = v
+		}
+		return withMetadata(finalizeCompletion(values, currentWord, false), groups, descriptions)
 	}
 
 	if nonFlags[0] == "save" {
-		values := []string{}
-		if !seenLocal {
-			values = append(values, "--local")
+		if seenLocal {
+			return CompletionResult{}
 		}
-		return finalizeCompletion(values, currentWord, false)
+		return withMetadata(
+			finalizeCompletion([]string{"--local"}, currentWord, false),
+			map[string]string{"--local": GroupFlags},
+			map[string]string{"--local": "Save into manifest.local.yml"},
+		)
 	}
 
 	if nonFlags[0] == "add" || nonFlags[0] == "remove" {
-		values := append(flags, filterSuggestions(m)...)
-		return finalizeCompletion(values, currentWord, false)
+		return filterAndFlagsSuggestion(m, flags, currentWord)
 	}
 	if nonFlags[0] == "refresh" || nonFlags[0] == "." {
-		return finalizeCompletion(flags, currentWord, false)
+		return flagsOnlySuggestion(flags, currentWord)
 	}
 
-	values := append(flags, filterSuggestions(m)...)
-	return finalizeCompletion(values, currentWord, false)
+	return filterAndFlagsSuggestion(m, flags, currentWord)
 }
 
 func completeMuxCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
