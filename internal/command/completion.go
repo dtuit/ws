@@ -45,6 +45,10 @@ type CompletionHandler func(m *manifest.Manifest, args []string, current int) Co
 //     <group>\t<value>\t<description>
 //     Empty group/description fields are allowed. Bash strips to <value>;
 //     zsh groups by <group> and shows <description> via _describe.
+//
+// Lines are emitted in (groupPriority, value) order so the zsh script's
+// "discover groups in order of first appearance" rule produces a stable
+// section ordering that puts the most useful sections first.
 func CompletionOutput(m *manifest.Manifest, words []string, current int) []string {
 	result := Complete(m, words, current)
 	if result.DelegateCommands {
@@ -53,7 +57,12 @@ func CompletionOutput(m *manifest.Manifest, words []string, current int) []strin
 	if result.FallbackCommands {
 		return []string{CompletionCommandFallbackSentinel}
 	}
-	out := make([]string, 0, len(result.Values))
+
+	type row struct {
+		group, value, desc string
+		priority           int
+	}
+	rows := make([]row, 0, len(result.Values))
 	for _, v := range result.Values {
 		group := ""
 		desc := ""
@@ -63,9 +72,49 @@ func CompletionOutput(m *manifest.Manifest, words []string, current int) []strin
 		if result.Descriptions != nil {
 			desc = result.Descriptions[v]
 		}
-		out = append(out, fmt.Sprintf("%s\t%s\t%s", group, v, desc))
+		rows = append(rows, row{
+			group:    group,
+			value:    v,
+			desc:     desc,
+			priority: groupPriority(group),
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].priority != rows[j].priority {
+			return rows[i].priority < rows[j].priority
+		}
+		return rows[i].value < rows[j].value
+	})
+
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, fmt.Sprintf("%s\t%s\t%s", r.group, r.value, r.desc))
 	}
 	return out
+}
+
+// groupPriority returns the display rank for a group label. Lower numbers
+// surface first in the completion menu. Unknown labels sort after the
+// known ones (in alphabetic order via the value tiebreaker).
+func groupPriority(group string) int {
+	switch group {
+	case GroupFlags:
+		return 0
+	case GroupSubcommands:
+		return 1
+	case GroupFilters:
+		return 2
+	case GroupGroups:
+		return 3
+	case GroupRemotes:
+		return 4
+	case GroupRepos:
+		return 5
+	case "":
+		return 99
+	default:
+		return 50
+	}
 }
 
 // Complete returns shell completion candidates for ws arguments.
