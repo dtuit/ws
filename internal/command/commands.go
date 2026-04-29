@@ -477,6 +477,7 @@ affected checkouts.
 		Help: []HelpEntry{
 			{Usage: "agent [--agent name] [repo] [-- args...]", Description: "Start an AI agent session"},
 			{Usage: "agent list [-v] [-l|-r] [-n N | --all] [filter]", Description: "List agent sessions (alias: ls)"},
+			{Usage: "agent search [--external] [-v] [-n N] <query>", Description: "Find sessions via an LLM search"},
 			{Usage: "agent resume <#|id>", Description: "Resume a previous agent session"},
 			{Usage: "agent pin [<#|id>]", Description: "Pin a session (no arg = current)"},
 			{Usage: "agent unpin [<#|id>]", Description: "Unpin a session (no arg = current)"},
@@ -489,6 +490,8 @@ Subcommands:
   (default)                          Start an agent session
   list|ls [-v] [-l|-r] [-n N|--all] [filter]
                                      List sessions
+  search [--external] [-v] [-n N] <query>
+                                     Find sessions via an LLM search
   resume <#|id>                      Resume a previous session
   pin [<#|id>]                       Pin a session (no arg = current)
   unpin [<#|id>]                     Unpin a session (no arg = current)
@@ -509,6 +512,17 @@ List options:
                          .         Current directory's repo (or root)
                          root      Only sessions started in the workspace root
                          external  Sessions started outside this workspace
+
+Search options:
+  --external           Include sessions started outside this workspace
+  -v, --verbose        Send last_prompt snippets to the searcher (more tokens)
+  -n <N>               Cap the number of results from the searcher (default: 10)
+
+  The searcher is an external LLM CLI. Your query plus a JSON catalog of
+  recent sessions is piped to its stdin. Resolution order:
+    1. $WS_AGENT_SEARCH_CMD environment variable
+    2. agents.search in manifest
+    3. ` + "`claude -p`" + ` (default)
 
 Resume / pin / unpin:
   <#>                  Numeric index from the most recent listing
@@ -532,6 +546,7 @@ original session and includes it in the resume command.
 
 Environment:
   WS_AGENT             Default agent profile name (overrides agents.default)
+  WS_AGENT_SEARCH_CMD  Searcher command for ws agent search (overrides agents.search)
 `,
 		complete: completeAgentCommand,
 	},

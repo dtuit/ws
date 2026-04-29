@@ -247,16 +247,18 @@ func parseEditorFlag(args []string) (string, []string) {
 }
 
 type agentArgs struct {
-	Action      string   // "start", "ls", "resume"
+	Action      string   // "start", "ls", "resume", "search"
 	Repo        string   // target repo (for start)
 	Agent       string   // agent profile name (--agent)
 	IndexOrID   string   // for resume: numeric index or session ID prefix
 	Filter      string   // for ls: filter expression
 	Limit       int      // for ls: max sessions (0 = default)
 	ShowAll     bool     // for ls: show all sessions
-	Verbose     bool     // for ls: show full prompt text
+	Verbose     bool     // for ls/search: include richer per-session text
 	ShowLast    bool     // for ls: compact view shows last user prompt
 	ShowRecap   bool     // for ls: compact view shows recap (fallback last/first)
+	Query       string   // for search: natural-language query
+	External    bool     // for search: include sessions outside the workspace
 	Passthrough []string // args after -- to pass to the agent CLI
 }
 
@@ -281,6 +283,8 @@ func parseAgentArgs(args []string) (agentArgs, error) {
 	switch wsArgs[0] {
 	case "ls", "list":
 		return parseAgentLSArgs(wsArgs[1:])
+	case "search":
+		return parseAgentSearchArgs(wsArgs[1:])
 	case "resume":
 		if len(wsArgs) != 2 {
 			return agentArgs{}, fmt.Errorf("usage: ws agent resume <#|session-id>")
@@ -358,6 +362,39 @@ func parseAgentLSArgs(args []string) (agentArgs, error) {
 	if parsed.ShowLast && parsed.ShowRecap {
 		return agentArgs{}, fmt.Errorf("--last and --recap are mutually exclusive")
 	}
+	return parsed, nil
+}
+
+func parseAgentSearchArgs(args []string) (agentArgs, error) {
+	parsed := agentArgs{Action: "search"}
+	var queryParts []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--external":
+			parsed.External = true
+		case "-v", "--verbose":
+			parsed.Verbose = true
+		case "-n":
+			if i+1 >= len(args) {
+				return agentArgs{}, fmt.Errorf("-n requires a number")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 1 {
+				return agentArgs{}, fmt.Errorf("-n requires a positive number")
+			}
+			parsed.Limit = n
+			i++
+		default:
+			if strings.HasPrefix(args[i], "-") && args[i] != "-" {
+				return agentArgs{}, fmt.Errorf("unknown flag: %s", args[i])
+			}
+			queryParts = append(queryParts, args[i])
+		}
+	}
+	if len(queryParts) == 0 {
+		return agentArgs{}, fmt.Errorf("usage: ws agent search [--external] [-v] [-n N] <query>")
+	}
+	parsed.Query = strings.Join(queryParts, " ")
 	return parsed, nil
 }
 

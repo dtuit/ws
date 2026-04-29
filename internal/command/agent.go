@@ -19,7 +19,7 @@ import (
 type AgentSession struct {
 	Agent            string    // "claude", "codex"
 	SessionID        string    // agent-specific session identifier
-	Repo             string    // repo name or "(root)" for workspace root
+	Repo             string    // repo name; workspace-root sessions use the workspace basename
 	Dir              string    // absolute path where the session was started
 	StartedAt        time.Time // first activity
 	LastActive       time.Time // most recent activity
@@ -43,8 +43,19 @@ const (
 	agentFilterCwd      = "."        // current directory
 	agentFilterRoot     = "root"     // workspace root sessions only
 	agentFilterExternal = "external" // sessions outside the workspace
-	agentRootRepoName   = "(root)"
 )
+
+// workspaceRootRepoName returns the label used in the REPO column for
+// sessions started at the workspace root. Defaults to the workspace
+// directory's basename so listings stay informative; falls back to
+// "workspace" if wsHome is empty / "/" / ".".
+func workspaceRootRepoName(wsHome string) string {
+	base := filepath.Base(wsHome)
+	if base == "" || base == "." || base == "/" {
+		return "workspace"
+	}
+	return base
+}
 
 // AgentListMode controls optional agent list output extensions.
 type AgentListMode struct {
@@ -79,7 +90,7 @@ func AgentList(m *manifest.Manifest, wsHome, filter string, includeWorktrees boo
 
 	// Post-filter for special tokens that buildPathIndex can't express
 	if filter == agentFilterRoot {
-		sessions = filterSessionsByRepo(sessions, agentRootRepoName)
+		sessions = filterSessionsByRepo(sessions, workspaceRootRepoName(wsHome))
 	}
 
 	if len(sessions) == 0 {
@@ -317,13 +328,13 @@ func buildPathIndex(m *manifest.Manifest, wsHome, filter string, includeWorktree
 	index := make(map[string]string)
 
 	if filter == agentFilterRoot {
-		index[wsHome] = agentRootRepoName
+		index[wsHome] = workspaceRootRepoName(wsHome)
 		return index
 	}
 
 	var repos []manifest.RepoInfo
 	if filter == "" {
-		index[wsHome] = agentRootRepoName
+		index[wsHome] = workspaceRootRepoName(wsHome)
 		repos = m.AllRepos(wsHome)
 	} else {
 		var err error
@@ -385,7 +396,7 @@ func resolveAgentListFilter(m *manifest.Manifest, wsHome, filter string) (string
 		return "", fmt.Errorf("current directory is not inside the workspace (%s)", wsHome)
 	}
 
-	if name == agentRootRepoName {
+	if name == workspaceRootRepoName(wsHome) {
 		return agentFilterRoot, nil
 	}
 	return name, nil

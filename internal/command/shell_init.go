@@ -33,7 +33,7 @@ ws() {
         return
       fi
       case "$2" in
-        ls|list|pin|unpin)
+        ls|list|search|pin|unpin)
           command ws "$@"
           ;;
         *)

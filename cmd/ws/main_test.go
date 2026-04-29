@@ -430,6 +430,41 @@ func TestParseAgentArgs_PassthroughOnly(t *testing.T) {
 	assert.Equal(t, []string{"-r"}, parsed.Passthrough)
 }
 
+func TestParseAgentArgs_SearchSimple(t *testing.T) {
+	parsed, err := parseAgentArgs([]string{"search", "ocr", "rewrite"})
+	require.NoError(t, err)
+	assert.Equal(t, "search", parsed.Action)
+	assert.Equal(t, "ocr rewrite", parsed.Query)
+	assert.False(t, parsed.External)
+	assert.False(t, parsed.Verbose)
+	assert.Equal(t, 0, parsed.Limit)
+}
+
+func TestParseAgentArgs_SearchFlags(t *testing.T) {
+	parsed, err := parseAgentArgs([]string{"search", "--external", "-v", "-n", "5", "find me a session"})
+	require.NoError(t, err)
+	assert.Equal(t, "search", parsed.Action)
+	assert.Equal(t, "find me a session", parsed.Query)
+	assert.True(t, parsed.External)
+	assert.True(t, parsed.Verbose)
+	assert.Equal(t, 5, parsed.Limit)
+}
+
+func TestParseAgentArgs_SearchRequiresQuery(t *testing.T) {
+	_, err := parseAgentArgs([]string{"search", "--external"})
+	require.Error(t, err)
+}
+
+func TestParseAgentArgs_SearchUnknownFlag(t *testing.T) {
+	_, err := parseAgentArgs([]string{"search", "--bogus", "query"})
+	require.Error(t, err)
+}
+
+func TestParseAgentArgs_SearchInvalidLimit(t *testing.T) {
+	_, err := parseAgentArgs([]string{"search", "-n", "0", "query"})
+	require.Error(t, err)
+}
+
 func activeRepoConfigs(t *testing.T, yaml string) map[string]manifest.RepoConfig {
 	t.Helper()
 

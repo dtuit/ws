@@ -139,6 +139,12 @@ func Complete(m *manifest.Manifest, words []string, current int) CompletionResul
 		commands := BuiltinCommandSuggestions()
 		filters, fGroups, fDescs := filterSuggestionsWithMeta(m)
 
+		// Comma-aware: once the user is mid-list (`ai,…`), only filter tokens
+		// make sense — drop flags and commands.
+		if head, tail := splitCommaWord(currentWord); head != "" {
+			return commaAwareFilter(head, tail, filters, fGroups, fDescs)
+		}
+
 		values := append([]string{}, flags...)
 		values = append(values, commands...)
 		values = append(values, filters...)
@@ -291,7 +297,7 @@ func completeAgentCommand(m *manifest.Manifest, args []string, current int) Comp
 	}
 	currentWord := completionWord(args, current)
 	if current == 0 {
-		values := []string{"list", "ls", "resume", "pin", "unpin", "--agent", "-a"}
+		values := []string{"list", "ls", "search", "resume", "pin", "unpin", "--agent", "-a"}
 		values = append(values, repoSuggestions(m)...)
 		return finalizeCompletion(values, currentWord, false)
 	}
@@ -306,6 +312,16 @@ func completeAgentCommand(m *manifest.Manifest, args []string, current int) Comp
 			}
 		}
 		return result
+	}
+	if len(args) > 0 && args[0] == "search" {
+		flags := []string{"--external", "-v", "--verbose", "-n"}
+		var values []string
+		for _, f := range flags {
+			if strings.HasPrefix(f, currentWord) {
+				values = append(values, f)
+			}
+		}
+		return finalizeCompletion(values, currentWord, false)
 	}
 	return finalizeCompletion(repoSuggestions(m), currentWord, false)
 }
@@ -440,9 +456,13 @@ func completeFilterCommand(m *manifest.Manifest, args []string, current int, fla
 }
 
 // filterAndFlagsSuggestion combines filter tokens (with group metadata) and
-// the given flag list.
+// the given flag list. When currentWord is mid-comma (e.g. `ai,re`), flags
+// drop out and only filter tokens are offered, comma-prefixed.
 func filterAndFlagsSuggestion(m *manifest.Manifest, flags []string, currentWord string) CompletionResult {
 	filters, fGroups, fDescs := filterSuggestionsWithMeta(m)
+	if head, tail := splitCommaWord(currentWord); head != "" {
+		return commaAwareFilter(head, tail, filters, fGroups, fDescs)
+	}
 	values := append([]string{}, flags...)
 	values = append(values, filters...)
 	groups := map[string]string{}
@@ -465,6 +485,9 @@ func flagsOnlySuggestion(flags []string, currentWord string) CompletionResult {
 
 func filterOnlySuggestion(m *manifest.Manifest, currentWord string) CompletionResult {
 	values, groups, descs := filterSuggestionsWithMeta(m)
+	if head, tail := splitCommaWord(currentWord); head != "" {
+		return commaAwareFilter(head, tail, values, groups, descs)
+	}
 	return withMetadata(finalizeCompletion(values, currentWord, false), groups, descs)
 }
 
@@ -559,6 +582,10 @@ func completeContextCommand(m *manifest.Manifest, args []string, current int) Co
 
 	if len(nonFlags) == 0 {
 		filterValues, fGroups, fDescs := filterSuggestionsWithMeta(m)
+		// Comma-aware: drop flags + subcommands once the user is mid-list.
+		if head, tail := splitCommaWord(currentWord); head != "" {
+			return commaAwareFilter(head, tail, filterValues, fGroups, fDescs)
+		}
 		values := append([]string{}, flags...)
 		for _, sc := range subcommands {
 			values = append(values, sc.name)
@@ -899,4 +926,73 @@ func hasFlag(flags []string, token string) bool {
 		}
 	}
 	return false
+}
+
+// splitCommaWord splits currentWord at the last comma. head includes the
+// trailing comma so callers can simply prepend it to candidates; tail is the
+// unfinished segment after the comma. For words without a comma, head is
+// empty and tail is the whole currentWord.
+func splitCommaWord(currentWord string) (head, tail string) {
+	if idx := strings.LastIndex(currentWord, ","); idx >= 0 {
+		return currentWord[:idx+1], currentWord[idx+1:]
+	}
+	return "", currentWord
+}
+
+// commaHeadParts returns the comma-separated tokens already chosen in head
+// (head minus its trailing comma, split on `,` and trimmed). Used to de-dupe
+// candidates so a token already in the list doesn't reappear.
+func commaHeadParts(head string) []string {
+	head = strings.TrimSuffix(head, ",")
+	if head == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(head, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// commaAwareFilter renders the next filter-token candidate for a mid-list
+// completion (`<head>,…`). Candidates are filtered against tail, de-duped
+// against segments already in head, and prefixed with head so the shell
+// replaces the whole current word atomically. Flag candidates are dropped:
+// they can't appear inside a comma-separated filter.
+func commaAwareFilter(head, tail string, filterValues []string, filterGroups, filterDescs map[string]string) CompletionResult {
+	chosen := make(map[string]struct{}, 4)
+	for _, p := range commaHeadParts(head) {
+		chosen[p] = struct{}{}
+	}
+	var values []string
+	groups := map[string]string{}
+	descs := map[string]string{}
+	seen := make(map[string]struct{}, len(filterValues))
+	for _, v := range filterValues {
+		if v == "" {
+			continue
+		}
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		if _, taken := chosen[v]; taken {
+			continue
+		}
+		if tail != "" && !strings.HasPrefix(v, tail) {
+			continue
+		}
+		rewritten := head + v
+		values = append(values, rewritten)
+		if g := filterGroups[v]; g != "" {
+			groups[rewritten] = g
+		}
+		if d := filterDescs[v]; d != "" {
+			descs[rewritten] = d
+		}
+	}
+	sort.Strings(values)
+	return CompletionResult{Values: values, Groups: groups, Descriptions: descs}
 }

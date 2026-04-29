@@ -353,6 +353,15 @@ dispatch:
 			if err := command.AgentResume(m, wsHome, parsed.IndexOrID); err != nil {
 				fatal(err)
 			}
+		case "search":
+			opts := command.AgentSearchOptions{
+				External:   parsed.External,
+				Verbose:    parsed.Verbose,
+				MaxResults: parsed.Limit,
+			}
+			if err := command.AgentSearch(m, wsHome, parsed.Query, opts); err != nil {
+				fatal(err)
+			}
 		case "pin":
 			if err := command.AgentPin(m, wsHome, parsed.IndexOrID); err != nil {
 				fatal(err)
