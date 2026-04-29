@@ -181,51 +181,43 @@ _ws_complete_zsh() {
     return
   fi
 
-  # Each line is "<group>\t<value>\t<desc>". Bucket by group, then call
-  # _describe per group so zsh renders headings + descriptions. Empty group
-  # falls into a no-heading bucket rendered last via plain compadd.
-  local -A _ws_buckets
+  # Each completion line is "<group>\t<value>\t<desc>". Discover groups in
+  # order of first appearance, then build a value-description array per group
+  # and hand it to _describe so zsh renders headings with the description
+  # column. Colons in values (e.g. "active:1d") are escaped because _describe
+  # treats ":" as the name/description separator.
   local -a _ws_order
-  local line group value desc rest
+  local -A _ws_seen
+  local line g rest v d
   for line in "${completions[@]}"; do
-    group="${line%%$'\t'*}"
-    rest="${line#*$'\t'}"
-    value="${rest%%$'\t'*}"
-    desc="${rest#*$'\t'}"
-    [[ "$desc" == "$value" ]] && desc=""
-
-    if [[ -z "${_ws_buckets[$group]+x}" ]]; then
-      _ws_order+=("$group")
-    fi
-    if [[ -n "$desc" ]]; then
-      _ws_buckets[$group]+="${value}"$'\x1f'"${desc}"$'\n'
-    else
-      _ws_buckets[$group]+="${value}"$'\x1f'$'\n'
+    g="${line%%$'\t'*}"
+    if [[ -z "${_ws_seen[$g]}" ]]; then
+      _ws_seen[$g]=1
+      _ws_order+=("$g")
     fi
   done
 
-  for group in "${_ws_order[@]}"; do
-    local -a _ws_items _ws_pairs
-    _ws_items=()
+  for g in "${_ws_order[@]}"; do
+    local -a _ws_pairs
     _ws_pairs=()
-    local entry v d
-    while IFS= read -r entry; do
-      [[ -z "$entry" ]] && continue
-      v="${entry%%$'\x1f'*}"
-      d="${entry#*$'\x1f'}"
-      [[ "$d" == "$entry" ]] && d=""
-      _ws_items+=("$v")
+    for line in "${completions[@]}"; do
+      [[ "${line%%$'\t'*}" == "$g" ]] || continue
+      rest="${line#*$'\t'}"
+      v="${rest%%$'\t'*}"
+      d="${rest#*$'\t'}"
+      [[ "$d" == "$rest" ]] && d=""
+      v="${v//:/\\:}"
       if [[ -n "$d" ]]; then
         _ws_pairs+=("$v:$d")
       else
         _ws_pairs+=("$v")
       fi
-    done <<< "${_ws_buckets[$group]}"
+    done
 
-    if [[ -z "$group" ]]; then
-      compadd -- "${_ws_items[@]}"
+    if [[ -z "$g" ]]; then
+      compadd -- "${_ws_pairs[@]}"
     else
-      _describe -t "$group" "$group" _ws_pairs
+      _describe -t "$g" "$g" _ws_pairs
     fi
   done
 }
