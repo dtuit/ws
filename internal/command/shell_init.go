@@ -234,7 +234,6 @@ elif [ -n "${ZSH_VERSION:-}" ]; then
   # each tag (the labels passed to _describe) as the section heading.
   zstyle ':completion:*:*:ws:*' group-name ''
   zstyle ':completion:*:*:ws:*:descriptions' format '%%B%%d%%b'
-  zstyle ':completion:*:*:ws:*' list-grouped true
   compdef _ws_complete_zsh ws
 fi
 `, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel)

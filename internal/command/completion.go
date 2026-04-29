@@ -218,25 +218,71 @@ func completeCDCommand(m *manifest.Manifest, args []string, current int) Complet
 	currentWord := completionWord(args, current)
 	switch current {
 	case 0:
-		return finalizeCompletion(repoSuggestions(m), currentWord, false)
+		return reposOnlySuggestion(m, currentWord)
 	case 1:
-		return finalizeCompletion([]string{"--worktree", "-t"}, currentWord, false)
+		flags := []string{"--worktree", "-t"}
+		return withMetadata(
+			finalizeCompletion(flags, currentWord, false),
+			map[string]string{"--worktree": GroupFlags, "-t": GroupFlags},
+			map[string]string{"--worktree": "Select a worktree by name/branch", "-t": "Select a worktree by name/branch"},
+		)
 	default:
 		return CompletionResult{}
 	}
 }
 
 func completeReposCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
-	return finalizeCompletion(append([]string{"--all", "-a"}, worktreesFlagSuggestions()...), completionWord(args, current), false)
+	flags := append([]string{"--all", "-a"}, worktreesFlagSuggestions()...)
+	groups := map[string]string{}
+	for _, f := range flags {
+		groups[f] = GroupFlags
+	}
+	descs := map[string]string{
+		"--all":          "Include excluded repos",
+		"-a":             "Include excluded repos",
+		"-t":             "Include linked worktrees",
+		"--worktrees":    "Include linked worktrees",
+		"--no-worktrees": "Force primary checkouts only",
+	}
+	return withMetadata(finalizeCompletion(flags, completionWord(args, current), false), groups, descs)
 }
 
 func completeBrowseCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
 	currentWord := completionWord(args, current)
 	if current == 0 {
-		values := append([]string{".", "--yes", "-y"}, repoSuggestions(m)...)
-		return finalizeCompletion(values, currentWord, false)
+		flags := []string{".", "--yes", "-y"}
+		repos := repoSuggestions(m)
+		values := append(append([]string{}, flags...), repos...)
+		groups := map[string]string{
+			".":      GroupFilters,
+			"--yes":  GroupFlags,
+			"-y":     GroupFlags,
+		}
+		descs := map[string]string{
+			".":     "Current directory's repo",
+			"--yes": "Skip confirmation prompt",
+			"-y":    "Skip confirmation prompt",
+		}
+		for _, r := range repos {
+			groups[r] = GroupRepos
+		}
+		return withMetadata(finalizeCompletion(values, currentWord, false), groups, descs)
 	}
-	return finalizeCompletion([]string{"--yes", "-y"}, currentWord, false)
+	return withMetadata(
+		finalizeCompletion([]string{"--yes", "-y"}, currentWord, false),
+		map[string]string{"--yes": GroupFlags, "-y": GroupFlags},
+		map[string]string{"--yes": "Skip confirmation prompt", "-y": "Skip confirmation prompt"},
+	)
+}
+
+// reposOnlySuggestion returns just the repo list with the GroupRepos label.
+func reposOnlySuggestion(m *manifest.Manifest, currentWord string) CompletionResult {
+	repos := repoSuggestions(m)
+	groups := map[string]string{}
+	for _, r := range repos {
+		groups[r] = GroupRepos
+	}
+	return withMetadata(finalizeCompletion(repos, currentWord, false), groups, nil)
 }
 
 func completeAgentCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
