@@ -131,7 +131,7 @@ _ws_complete_bash() {
   # values, so strip to the second field.
   for line in "${completions[@]}"; do
     value="${line#*$'\t'}"
-    value="${value%%$'\t'*}"
+    value="${value%%%%$'\t'*}"
     COMPREPLY+=( "$value" )
   done
 }
@@ -190,7 +190,7 @@ _ws_complete_zsh() {
   local -A _ws_seen
   local line g rest v d
   for line in "${completions[@]}"; do
-    g="${line%%$'\t'*}"
+    g="${line%%%%$'\t'*}"
     if [[ -z "${_ws_seen[$g]}" ]]; then
       _ws_seen[$g]=1
       _ws_order+=("$g")
@@ -201,9 +201,9 @@ _ws_complete_zsh() {
     local -a _ws_pairs
     _ws_pairs=()
     for line in "${completions[@]}"; do
-      [[ "${line%%$'\t'*}" == "$g" ]] || continue
+      [[ "${line%%%%$'\t'*}" == "$g" ]] || continue
       rest="${line#*$'\t'}"
-      v="${rest%%$'\t'*}"
+      v="${rest%%%%$'\t'*}"
       d="${rest#*$'\t'}"
       [[ "$d" == "$rest" ]] && d=""
       v="${v//:/\\:}"
