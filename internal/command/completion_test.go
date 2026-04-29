@@ -94,6 +94,89 @@ func TestCompleteShellIncludesSubcommands(t *testing.T) {
 	assert.Contains(t, result.Values, "install")
 }
 
+func TestCompleteUpgradeSuggestsCheckFlag(t *testing.T) {
+	result := Complete(nil, []string{"upgrade", ""}, 1)
+	assert.Equal(t, []string{"--check"}, result.Values)
+}
+
+func TestCompleteUpgradeNoFurtherArgs(t *testing.T) {
+	result := Complete(nil, []string{"upgrade", "--check", ""}, 2)
+	assert.Empty(t, result.Values)
+}
+
+func TestCompleteRemotesSuggestsSync(t *testing.T) {
+	result := Complete(nil, []string{"remotes", ""}, 1)
+	assert.Equal(t, []string{"sync"}, result.Values)
+}
+
+func TestCompleteRemotesSyncSuggestsFilters(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"remotes", "sync", ""}, 2)
+	assert.Contains(t, result.Values, "ai")
+	assert.Contains(t, result.Values, "repo-a")
+	assert.Contains(t, result.Values, "all")
+}
+
+func TestCompleteFetchSuggestsRemoteFlagAndFilters(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+    remotes:
+      upstream: git@github.com:upstream/repo-a.git
+`)
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"fetch", ""}, 1)
+	assert.Contains(t, result.Values, "--remote")
+	assert.Contains(t, result.Values, "ai")
+	assert.Contains(t, result.Values, "repo-a")
+}
+
+func TestCompleteFetchAfterRemoteSuggestsRemoteNames(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+repos:
+  repo-a:
+    remotes:
+      upstream: git@github.com:upstream/repo-a.git
+`)
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"fetch", "--remote", ""}, 2)
+	assert.Contains(t, result.Values, "origin")
+	assert.Contains(t, result.Values, "upstream")
+}
+
+func TestCompleteRepairRefspecsSuggestsFilters(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"repair-refspecs", ""}, 1)
+	assert.Contains(t, result.Values, "ai")
+	assert.Contains(t, result.Values, "repo-a")
+}
+
 func TestCompleteLLIncludesWorktreesFlagAndFilters(t *testing.T) {
 	m, err := parseManifestYAML(`
 remotes:

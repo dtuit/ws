@@ -213,7 +213,7 @@ date, the install command users already use to upgrade.
 --check is currently the only mode and the default; --apply will be
 added in a future release.
 `,
-		complete: completeNoopCommand,
+		complete: completeUpgradeCommand,
 	},
 	{
 		Name:        CommandOpen,
@@ -439,7 +439,7 @@ For each repo in the filter:
 Never removes or renames remotes. Use when the manifest gains new remotes
 after a repo was already cloned.
 `,
-		complete: completeNoopCommand,
+		complete: completeRemotesCommand,
 	},
 	{
 		Name:        CommandRepairRefspecs,
@@ -467,7 +467,7 @@ and reported for manual review.
 Legacy tool — intended to be removed in a future release once no one has
 affected checkouts.
 `,
-		complete: completeNoopCommand,
+		complete: completeRepairRefspecsCommand,
 	},
 	{
 		Name:        CommandAgent,

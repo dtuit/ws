@@ -160,10 +160,40 @@ func completeSetupCommand(m *manifest.Manifest, args []string, current int) Comp
 }
 
 func completeFetchCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
-	if current == 0 {
-		return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
+	if current < 0 {
+		return CompletionResult{}
 	}
-	return CompletionResult{}
+	currentWord := completionWord(args, current)
+
+	// Position immediately after a `--remote` token: complete the remote name.
+	if current > 0 && args[current-1] == "--remote" {
+		return finalizeCompletion(remoteNameSuggestions(m), currentWord, false)
+	}
+
+	// First positional: --remote flag + filters.
+	values := append([]string{"--remote"}, filterSuggestions(m)...)
+	// Allow filter completion on later positions too, since --remote can repeat.
+	return finalizeCompletion(values, currentWord, false)
+}
+
+// remoteNameSuggestions returns the union of remote names declared across all
+// active repos in the manifest (e.g. origin, upstream, …).
+func remoteNameSuggestions(m *manifest.Manifest) []string {
+	if m == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for name, cfg := range m.ActiveRepos() {
+		for k := range m.ResolveRemotes(name, cfg) {
+			seen[k] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func completeLLCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
@@ -218,6 +248,30 @@ func completeShellCommand(_ *manifest.Manifest, args []string, current int) Comp
 	}
 	if current == 0 {
 		return finalizeCompletion([]string{"init", "install"}, completionWord(args, current), false)
+	}
+	return CompletionResult{}
+}
+
+func completeUpgradeCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
+	if current != 0 {
+		return CompletionResult{}
+	}
+	return finalizeCompletion([]string{"--check"}, completionWord(args, current), false)
+}
+
+func completeRemotesCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current == 0 {
+		return finalizeCompletion([]string{"sync"}, completionWord(args, current), false)
+	}
+	if len(args) > 0 && args[0] == "sync" && current == 1 {
+		return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
+	}
+	return CompletionResult{}
+}
+
+func completeRepairRefspecsCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current == 0 {
+		return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
 	}
 	return CompletionResult{}
 }
