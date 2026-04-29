@@ -510,6 +510,175 @@ repos:
 	assert.Equal(t, 0, result.DelegateStart)
 }
 
+func TestCompleteCommaFilterPrefixesCandidates(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+  eng: [repo-b]
+repos:
+  repo-a:
+  repo-b:
+  repo-c:
+`)
+	require.NoError(t, err)
+
+	// Mid-list with prefix: every candidate keeps its `ai,` head and only
+	// values that prefix-match `re` survive.
+	result := Complete(m, []string{"ll", "ai,re"}, 1)
+	assert.Contains(t, result.Values, "ai,repo-a")
+	assert.Contains(t, result.Values, "ai,repo-b")
+	assert.Contains(t, result.Values, "ai,repo-c")
+	for _, v := range result.Values {
+		assert.True(t, strings.HasPrefix(v, "ai,re"), "value should keep head: %q", v)
+	}
+}
+
+func TestCompleteCommaFilterExcludesAlreadyChosen(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+  eng: [repo-b]
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+
+	// `ai,` — empty trailing segment, all filter tokens listed, `ai` excluded.
+	result := Complete(m, []string{"ll", "ai,"}, 1)
+	assert.Contains(t, result.Values, "ai,eng")
+	assert.Contains(t, result.Values, "ai,repo-a")
+	assert.NotContains(t, result.Values, "ai,ai", "already-chosen group must not reappear")
+}
+
+func TestCompleteCommaFilterChainExcludesAllChosen(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+  eng: [repo-b]
+repos:
+  repo-a:
+  repo-b:
+  repo-c:
+`)
+	require.NoError(t, err)
+
+	// `ai,repo-a,` — both `ai` and `repo-a` are chosen and must vanish.
+	result := Complete(m, []string{"ll", "ai,repo-a,"}, 1)
+	for _, v := range result.Values {
+		assert.NotEqual(t, "ai,repo-a,ai", v)
+		assert.NotEqual(t, "ai,repo-a,repo-a", v)
+	}
+	assert.Contains(t, result.Values, "ai,repo-a,eng")
+	assert.Contains(t, result.Values, "ai,repo-a,repo-b")
+}
+
+func TestCompleteCommaFilterDropsFlags(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+`)
+	require.NoError(t, err)
+
+	// Flags can't appear inside a comma list — they must drop out entirely.
+	result := Complete(m, []string{"ll", "ai,"}, 1)
+	for _, v := range result.Values {
+		assert.False(t, strings.Contains(v, "--"), "flag leaked into comma list: %q", v)
+		assert.False(t, strings.Contains(v, "-t"), "flag leaked into comma list: %q", v)
+	}
+}
+
+func TestCompleteCommaFilterCarriesGroupMetadata(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+
+	result := Complete(m, []string{"ctx", "ai,"}, 1)
+	// Group metadata must be re-keyed under the prefixed value.
+	assert.Equal(t, GroupRepos, result.Groups["ai,repo-a"])
+	assert.Equal(t, GroupFilters, result.Groups["ai,all"])
+	assert.NotContains(t, result.Values, "ai,ai", "already-chosen segment must be excluded")
+}
+
+func TestCompleteCommaFilterAtTopLevel(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+  eng: [repo-b]
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+
+	// Top-level `ws ai,` — flags + commands drop out; only filter tokens
+	// remain, comma-prefixed.
+	result := Complete(m, []string{"ai,"}, 0)
+	assert.Contains(t, result.Values, "ai,eng")
+	assert.Contains(t, result.Values, "ai,repo-a")
+	for _, v := range result.Values {
+		assert.False(t, strings.HasPrefix(v, "ai,-"), "flag leaked at top level: %q", v)
+		assert.NotEqual(t, "ai,ll", v, "command leaked at top level: %q", v)
+	}
+}
+
+func TestCompleteCommaFilterContextAdd(t *testing.T) {
+	m, err := parseManifestYAML(`
+remotes:
+  origin: git@example.com:org
+groups:
+  ai: [repo-a]
+  eng: [repo-b]
+repos:
+  repo-a:
+  repo-b:
+`)
+	require.NoError(t, err)
+
+	// `ws ctx add ai,` should also be comma-aware (filterAndFlagsSuggestion).
+	result := Complete(m, []string{"ctx", "add", "ai,"}, 2)
+	assert.Contains(t, result.Values, "ai,eng")
+	assert.Contains(t, result.Values, "ai,repo-a")
+	assert.NotContains(t, result.Values, "ai,ai")
+}
+
+func TestSplitCommaWord(t *testing.T) {
+	cases := []struct {
+		in, head, tail string
+	}{
+		{"", "", ""},
+		{"ai", "", "ai"},
+		{"ai,", "ai,", ""},
+		{"ai,re", "ai,", "re"},
+		{"ai,repo-a,fro", "ai,repo-a,", "fro"},
+		{",", ",", ""},
+	}
+	for _, c := range cases {
+		head, tail := splitCommaWord(c.in)
+		assert.Equal(t, c.head, head, "head for %q", c.in)
+		assert.Equal(t, c.tail, tail, "tail for %q", c.in)
+	}
+}
+
 func TestCompleteEscapedPassthroughDelegatesAfterCommandWord(t *testing.T) {
 	m, err := parseManifestYAML(`
 remotes:
