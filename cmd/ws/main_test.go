@@ -67,12 +67,72 @@ printf '%s\n' "${COMPREPLY[@]}"
 	assert.Contains(t, strings.Fields(string(out)), "branch")
 }
 
+func TestShellInitShowsActiveWorkspaceInPrompt(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not installed")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not installed")
+	}
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, "ws")
+	build := exec.Command("go", "build", "-o", binPath, ".")
+	build.Dir = wd
+	build.Env = os.Environ()
+	output, err := build.CombinedOutput()
+	require.NoError(t, err, string(output))
+
+	wsHome := filepath.Join(tmpDir, "workspace")
+	require.NoError(t, os.MkdirAll(wsHome, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(wsHome, "manifest.yml"), []byte(`
+root: repos
+remotes:
+  origin: git@example.com:org
+workspaces:
+  backend: backend
+groups:
+  backend: [api]
+repos:
+  api:
+`), 0644))
+
+	script := filepath.Join(tmpDir, "prompt.sh")
+	require.NoError(t, os.WriteFile(script, []byte(strings.TrimSpace(`
+set -euo pipefail
+export WS_HOME="`+wsHome+`"
+export PATH="`+tmpDir+`:$PATH"
+source <(ws shell init)
+PS1='$ '
+_ws_refresh_prompt
+printf 'initial:%s\n' "$PS1"
+ws workspace use backend >/dev/null
+printf 'after_use:%s\n' "$PS1"
+ws workspace clear >/dev/null
+printf 'after_clear:%s\n' "$PS1"
+`)+"\n"), 0755))
+
+	run := exec.Command("bash", script)
+	run.Env = os.Environ()
+	out, err := run.CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	text := string(out)
+	assert.Contains(t, text, "initial:$ ")
+	assert.Contains(t, text, "after_use:(ws:backend) $ ")
+	assert.Contains(t, text, "after_clear:$ ")
+}
+
 func TestUsageTextIncludesSharedCommandHelp(t *testing.T) {
 	text := command.UsageText()
 
 	assert.Contains(t, text, "ll [filter]")
 	assert.Contains(t, text, "cd [repo[@worktree]]")
 	assert.Contains(t, text, "context [subcommand]")
+	assert.Contains(t, text, "workspace [subcommand]")
 	assert.Contains(t, text, "worktree [subcommand]")
 	assert.Contains(t, text, "repos [--all]")
 	assert.Contains(t, text, "(alias: ctx)")
@@ -108,6 +168,25 @@ func TestParseShellArgsRejectsInvalidInput(t *testing.T) {
 
 	_, err = parseShellArgs([]string{"install", "extra"})
 	require.Error(t, err)
+}
+
+func TestParseWorkspaceArgsShow(t *testing.T) {
+	parsed, err := parseWorkspaceArgs(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "show", parsed.Action)
+}
+
+func TestParseWorkspaceArgsUse(t *testing.T) {
+	parsed, err := parseWorkspaceArgs([]string{"use", "backend"})
+	require.NoError(t, err)
+	assert.Equal(t, "use", parsed.Action)
+	assert.Equal(t, "backend", parsed.Name)
+}
+
+func TestParseWorkspaceArgsClear(t *testing.T) {
+	parsed, err := parseWorkspaceArgs([]string{"clear"})
+	require.NoError(t, err)
+	assert.Equal(t, "clear", parsed.Action)
 }
 
 func TestParseContextArgs_Show(t *testing.T) {

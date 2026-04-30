@@ -58,38 +58,36 @@ root: ..
 workspace: ws.code-workspace
 
 # ---------------------------------------------------------------------------
+# workspaces
+# ---------------------------------------------------------------------------
+# Optional named workspace presets.
+#
+# Each entry maps a workspace name to the filter it should use.
+#
+# Example:
+#   workspaces:
+#     backend: backend,active:14d
+#     frontend: web-app,admin-dashboard
+#
+# Run `ws workspace use <name>` to activate one in the current shell.
+# With `ws shell init` loaded, that command updates `WS_WORKSPACE` so
+# `ws ll`, `ws open`, and fan-out commands default to that workspace.
+
+workspaces:
+  backend: backend
+  frontend: web-app,admin-dashboard
+
+# ---------------------------------------------------------------------------
 # scopes
 # ---------------------------------------------------------------------------
-# Generated symlink directories for repo views used by agents and other
-# filesystem-based tooling.
+# Legacy symlink-scope configuration from older ws versions.
 #
-# Default:
-#   scopes:
-#     - dir: .scope
-#       source: context
-#
-# Each entry has:
-#   dir: workspace-relative directory to generate
-#   source: which repo set to expose
-#
-# Supported sources:
-#   context  the repos in the current ws context
-#   all      all cloned repos on disk, regardless of current context
-#
-# Examples:
-#   scopes:
-#     - dir: .scope
-#       source: context
-#     - dir: .all-repos
-#       source: all
-#
-# Disable generated scope dirs entirely:
-#   scopes: []
+# New agent integrations should prefer the `.ws/scope.yml` hint written by
+# `ws context`, or `.ws/workspaces/<name>/scope.yml` for named workspaces.
+# This block is still parsed so ws can clean up old symlink trees safely.
 #
 # Recommendation:
-#   Keep the shared manifest on the default `.scope` unless the whole team wants
-#   a different agent-facing directory name. Personal extra views like
-#   `.all-repos` fit well in manifest.local.yml.
+#   Omit this block for new workspaces unless you need migration compatibility.
 
 scopes:
   - dir: .scope
@@ -293,16 +291,15 @@ exclude:
 #   groups:         local replaces same-name groups, new groups added
 #   root:           local overrides if set
 #   workspace:      local overrides if set
+#   workspaces:     local replaces same-name presets, new presets added
 #   scopes:         local replaces the full list if set
 #   worktrees:      local overrides if set
 #
 # Example manifest.local.yml:
 #
-#   scopes:
-#     - dir: .scope
-#       source: context
-#     - dir: .all-repos
-#       source: all
+#   workspaces:
+#     backend: backend,active:7d
+#     frontend: web-app,admin-dashboard
 #
 #   worktrees: true
 #

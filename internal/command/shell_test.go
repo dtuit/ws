@@ -20,4 +20,7 @@ func TestShellInitScriptUsesCompletionSentinel(t *testing.T) {
 	assert.Contains(t, script, CompletionCommandFallbackSentinel)
 	assert.Contains(t, script, "_ws_complete_bash")
 	assert.Contains(t, script, "_ws_complete_zsh")
+	assert.Contains(t, script, "_ws_prompt_prefix")
+	assert.Contains(t, script, "_ws_refresh_prompt")
+	assert.Contains(t, script, "WS_CHANGEPS1")
 }

@@ -11,8 +11,8 @@ import (
 	"github.com/dtuit/ws/internal/manifest"
 )
 
-func writeWorkspace(m *manifest.Manifest, wsHome string, repos []manifest.RepoInfo, includeWorktrees bool) error {
-	wsFile := filepath.Join(wsHome, m.Workspace)
+func writeWorkspace(m *manifest.Manifest, wsHome, workspace string, repos []manifest.RepoInfo, includeWorktrees bool) error {
+	wsFile := workspaceFilePath(m, wsHome, workspace)
 
 	// Filter to cloned repos — avoids VS Code showing missing folders when
 	// a context is set before the repos are cloned.
@@ -40,7 +40,7 @@ func writeWorkspace(m *manifest.Manifest, wsHome string, repos []manifest.RepoIn
 		return err
 	}
 
-	fmt.Println(workspaceSummary(m.Workspace, len(cloned), worktreeCount, includeWorktrees))
+	fmt.Println(workspaceSummary(filepath.Base(wsFile), len(cloned), worktreeCount, includeWorktrees))
 	return nil
 }
 
@@ -59,11 +59,11 @@ func ResolveEditor(flagValue string) string {
 }
 
 // Open opens the generated workspace file with the given editor.
-func Open(m *manifest.Manifest, wsHome string, editor string) error {
-	wsFile := filepath.Join(wsHome, m.Workspace)
+func Open(m *manifest.Manifest, wsHome, workspace, editor string) error {
+	wsFile := workspaceFilePath(m, wsHome, workspace)
 	if _, err := os.Stat(wsFile); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("%s not found; run `ws context ...` first", m.Workspace)
+			return fmt.Errorf("%s not found; run `ws context ...` first", filepath.Base(wsFile))
 		}
 		return err
 	}
@@ -77,7 +77,7 @@ func Open(m *manifest.Manifest, wsHome string, editor string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	fmt.Printf("Opened %s with %s\n", m.Workspace, editor)
+	fmt.Printf("Opened %s with %s\n", filepath.Base(wsFile), editor)
 	return nil
 }
 

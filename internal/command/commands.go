@@ -1,25 +1,26 @@
 package command
 
 const (
-	CommandHelp    = "help"
-	CommandVersion = "version"
-	CommandLL      = "ll"
-	CommandCD      = "cd"
-	CommandSetup   = "setup"
-	CommandShell   = "shell"
-	CommandOpen    = "open"
-	CommandBrowse  = "browse"
-	CommandRepos   = "repos"
-	CommandFetch   = "fetch"
-	CommandPull    = "pull"
-	CommandAgent   = "agent"
-	CommandContext  = "context"
-	CommandDirs    = "dirs"
-	CommandMux      = "mux"
-	CommandWorktree = "worktree"
-	CommandRemotes  = "remotes"
+	CommandHelp           = "help"
+	CommandVersion        = "version"
+	CommandLL             = "ll"
+	CommandCD             = "cd"
+	CommandSetup          = "setup"
+	CommandShell          = "shell"
+	CommandOpen           = "open"
+	CommandBrowse         = "browse"
+	CommandRepos          = "repos"
+	CommandFetch          = "fetch"
+	CommandPull           = "pull"
+	CommandAgent          = "agent"
+	CommandContext        = "context"
+	CommandWorkspace      = "workspace"
+	CommandDirs           = "dirs"
+	CommandMux            = "mux"
+	CommandWorktree       = "worktree"
+	CommandRemotes        = "remotes"
 	CommandRepairRefspecs = "repair-refspecs"
-	CommandUpgrade  = "upgrade"
+	CommandUpgrade        = "upgrade"
 )
 
 // Category groups related commands under one heading in `ws help`.
@@ -219,11 +220,41 @@ added in a future release.
 		Name:        CommandOpen,
 		Category:    CategoryTools,
 		ShowInUsage: true,
-		Summary:     HelpEntry{Usage: "[--editor <name>]", Description: "Open the workspace in an editor"},
+		Summary:     HelpEntry{Usage: "[name] [--editor <name>]", Description: "Open the active or named workspace in an editor"},
 		Help: []HelpEntry{
-			{Usage: "open [--editor <name>]", Description: "Open workspace (default: code, or WS_EDITOR)"},
+			{Usage: "open [name] [--editor <name>]", Description: "Open active workspace (or the named workspace)"},
 		},
-		complete: completeNoopCommand,
+		complete: completeOpenCommand,
+	},
+	{
+		Name:        CommandWorkspace,
+		Aliases:     []string{"workspaces"},
+		Category:    CategoryScope,
+		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[subcommand]", Description: "Manage named VS Code workspaces"},
+		Help: []HelpEntry{
+			{Usage: "workspace", Description: "Show the active shell workspace and saved presets"},
+			{Usage: "workspace list", Description: "List saved workspaces (alias: ls)"},
+			{Usage: "workspace use <name>", Description: "Activate a named workspace in this shell"},
+			{Usage: "workspace clear", Description: "Return this shell to the default context"},
+		},
+		DetailedHelp: `Usage: ws workspace [subcommand] [options]
+
+Manage named workspace presets defined under workspaces: in manifest.yml.
+
+Subcommands:
+  (no subcommand)            Show the active shell workspace and saved presets
+  list|ls                    List saved workspaces
+  use <name>                 Prepare and activate a named workspace in this shell
+  clear|unset                Clear WS_WORKSPACE for this shell
+
+Activation is per shell. With shell integration loaded, ` + "`" + `ws workspace use <name>` + "`" + `
+updates WS_WORKSPACE automatically so commands like ` + "`" + `ws ll` + "`" + ` and ` + "`" + `ws open` + "`" + `
+default to that workspace's saved context.
+
+Alias: workspaces
+`,
+		complete: completeWorkspaceCommand,
 	},
 	{
 		Name:        CommandBrowse,

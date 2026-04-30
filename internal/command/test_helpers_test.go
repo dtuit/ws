@@ -101,18 +101,30 @@ func commitEmptyAt(t *testing.T, repoPath, message, name, email string, when tim
 func assertScopeEntries(t *testing.T, wsHome string, want ...string) {
 	t.Helper()
 
-	assertScopeEntriesInDir(t, wsHome, manifest.DefaultScopeDir, want...)
+	assertScopeEntriesForWorkspace(t, wsHome, "", want...)
 }
 
 func assertScopeEntriesInDir(t *testing.T, wsHome, dir string, want ...string) {
 	t.Helper()
 
-	entries, err := os.ReadDir(filepath.Join(wsHome, dir))
+	if dir != manifest.DefaultScopeDir {
+		t.Fatalf("scope dir %s is no longer supported; use workspace scope hints", dir)
+	}
+	assertScopeEntriesForWorkspace(t, wsHome, "", want...)
+}
+
+func assertScopeEntriesForWorkspace(t *testing.T, wsHome, workspace string, want ...string) {
+	t.Helper()
+
+	data, err := os.ReadFile(workspaceScopeHintPath(wsHome, workspace))
 	require.NoError(t, err)
 
+	var hint scopeHint
+	require.NoError(t, yaml.Unmarshal(data, &hint))
+
 	var got []string
-	for _, entry := range entries {
-		got = append(got, entry.Name())
+	for _, repo := range hint.Repos {
+		got = append(got, repo.Name)
 	}
 	assert.Equal(t, want, got)
 }
@@ -120,8 +132,12 @@ func assertScopeEntriesInDir(t *testing.T, wsHome, dir string, want ...string) {
 func assertNoScopeDir(t *testing.T, wsHome, dir string) {
 	t.Helper()
 
-	_, err := os.Stat(filepath.Join(wsHome, dir))
-	assert.True(t, os.IsNotExist(err), "expected %s to be absent", dir)
+	if dir != manifest.DefaultScopeDir {
+		t.Fatalf("scope dir %s is no longer supported; use workspace scope hints", dir)
+	}
+
+	_, err := os.Stat(workspaceScopeHintPath(wsHome, ""))
+	assert.True(t, os.IsNotExist(err), "expected %s to be absent", workspaceScopeHintPath(wsHome, ""))
 }
 
 func assertWorkspaceFolders(t *testing.T, workspacePath string, want ...string) {

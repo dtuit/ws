@@ -30,6 +30,7 @@ const (
 	GroupFlags       = "flags"
 	GroupFilters     = "filter tokens"
 	GroupGroups      = "groups"
+	GroupWorkspaces  = "workspaces"
 	GroupRepos       = "repos"
 	GroupRemotes     = "remotes"
 )
@@ -106,10 +107,12 @@ func groupPriority(group string) int {
 		return 2
 	case GroupGroups:
 		return 3
-	case GroupRemotes:
+	case GroupWorkspaces:
 		return 4
-	case GroupRepos:
+	case GroupRemotes:
 		return 5
+	case GroupRepos:
+		return 6
 	case "":
 		return 99
 	default:
@@ -260,9 +263,9 @@ func completeBrowseCommand(m *manifest.Manifest, args []string, current int) Com
 		repos := repoSuggestions(m)
 		values := append(append([]string{}, flags...), repos...)
 		groups := map[string]string{
-			".":      GroupFilters,
-			"--yes":  GroupFlags,
-			"-y":     GroupFlags,
+			".":     GroupFilters,
+			"--yes": GroupFlags,
+			"-y":    GroupFlags,
 		}
 		descs := map[string]string{
 			".":     "Current directory's repo",
@@ -289,6 +292,39 @@ func reposOnlySuggestion(m *manifest.Manifest, currentWord string) CompletionRes
 		groups[r] = GroupRepos
 	}
 	return withMetadata(finalizeCompletion(repos, currentWord, false), groups, nil)
+}
+
+func completeOpenCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current < 0 {
+		return CompletionResult{}
+	}
+
+	currentWord := completionWord(args, current)
+	if current > 0 && (args[current-1] == "--editor" || args[current-1] == "-e") {
+		return CompletionResult{}
+	}
+
+	flags := []string{"--editor", "-e"}
+	workspaceNames := workspacePresetNames(m)
+	values := append([]string{}, flags...)
+	values = append(values, workspaceNames...)
+
+	groups := map[string]string{
+		"--editor": GroupFlags,
+		"-e":       GroupFlags,
+	}
+	descs := map[string]string{
+		"--editor": "Open with a specific editor command",
+		"-e":       "Open with a specific editor command",
+	}
+	for _, name := range workspaceNames {
+		groups[name] = GroupWorkspaces
+		if filter, ok := m.Workspaces[name]; ok {
+			descs[name] = filter
+		}
+	}
+
+	return withMetadata(finalizeCompletion(values, currentWord, false), groups, descs)
 }
 
 func completeAgentCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
@@ -622,6 +658,42 @@ func completeContextCommand(m *manifest.Manifest, args []string, current int) Co
 	}
 
 	return filterAndFlagsSuggestion(m, flags, currentWord)
+}
+
+func completeWorkspaceCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current < 0 {
+		return CompletionResult{}
+	}
+
+	currentWord := completionWord(args, current)
+	subs := []string{"list", "ls", "use", "clear", "unset"}
+	descs := map[string]string{
+		"list":  "List saved workspace presets",
+		"ls":    "List saved workspace presets",
+		"use":   "Activate a named workspace in this shell",
+		"clear": "Clear the active shell workspace",
+		"unset": "Clear the active shell workspace",
+	}
+	if current == 0 {
+		groups := map[string]string{}
+		for _, s := range subs {
+			groups[s] = GroupSubcommands
+		}
+		return withMetadata(finalizeCompletion(subs, currentWord, false), groups, descs)
+	}
+
+	if len(args) > 0 && args[0] == "use" && current == 1 {
+		names := workspacePresetNames(m)
+		groups := map[string]string{}
+		workspaceDescs := map[string]string{}
+		for _, name := range names {
+			groups[name] = GroupWorkspaces
+			workspaceDescs[name] = m.Workspaces[name]
+		}
+		return withMetadata(finalizeCompletion(names, currentWord, false), groups, workspaceDescs)
+	}
+
+	return CompletionResult{}
 }
 
 func completeMuxCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
