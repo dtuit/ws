@@ -240,6 +240,79 @@ func readClaudeSessionMeta(claudeDir, projectPath, sessionID string) (claudeSess
 	return meta, true
 }
 
+// readClaudeNameFromTranscript scans a session's conversation JSONL for
+// the most recent /rename command and returns its argument. The live
+// session metadata file (~/.claude/sessions/<pid>.json) is deleted when
+// the agent process exits, so the transcript is the only persistent
+// source of the user-set name for non-live sessions.
+//
+// Returns ("", false) when no /rename event is present (so the caller
+// can leave Name unchanged). Returns ("", true) for an explicit clear
+// (e.g. /rename with empty args), which the caller should treat as
+// authoritative.
+func readClaudeNameFromTranscript(claudeDir, projectPath, sessionID string) (string, bool) {
+	dirName := strings.ReplaceAll(projectPath, string(filepath.Separator), "-")
+	jsonlPath := filepath.Join(claudeDir, "projects", dirName, sessionID+".jsonl")
+
+	f, err := os.Open(jsonlPath)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	needle := []byte(`<command-name>/rename</command-name>`)
+	var name string
+	var found bool
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if !bytes.Contains(line, needle) {
+			continue
+		}
+		var record struct {
+			Type    string `json:"type"`
+			Subtype string `json:"subtype"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(line, &record); err != nil {
+			continue
+		}
+		if record.Type != "system" || record.Subtype != "local_command" {
+			continue
+		}
+		n, ok := parseRenameArgs(record.Content)
+		if !ok {
+			continue
+		}
+		name = n
+		found = true
+	}
+	return name, found
+}
+
+// parseRenameArgs extracts the argument from a /rename local_command
+// record's content block. The input event embeds the new name in
+// <command-args>...</command-args>; the matching stdout event has no
+// command-args block and is skipped (returns false).
+func parseRenameArgs(content string) (string, bool) {
+	if !strings.Contains(content, "<command-name>/rename</command-name>") {
+		return "", false
+	}
+	start := strings.Index(content, "<command-args>")
+	if start < 0 {
+		return "", false
+	}
+	start += len("<command-args>")
+	end := strings.Index(content[start:], "</command-args>")
+	if end < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(content[start : start+end]), true
+}
+
 // enrichClaudeSessionDetail reads the conversation JSONL file to extract
 // the away_summary (recap) and last-prompt records for verbose display.
 func enrichClaudeSessionDetail(s *AgentSession, claudeDir string) {

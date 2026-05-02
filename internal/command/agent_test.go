@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,6 +167,109 @@ func TestEnrichClaudeSessionMetadata_IgnoresBadFiles(t *testing.T) {
 	sessions := []AgentSession{{SessionID: "sess-x"}}
 	enrichClaudeSessionMetadata(sessions, home)
 	assert.Equal(t, "keep", sessions[0].Name)
+}
+
+func TestCodexThreadName(t *testing.T) {
+	cases := []struct {
+		name             string
+		title            string
+		firstUserMessage string
+		want             string
+	}{
+		{name: "renamed", title: "fix-bifrost", firstUserMessage: "Use a subagent to do X", want: "fix-bifrost"},
+		{name: "title equals prompt", title: "do X", firstUserMessage: "do X", want: ""},
+		{name: "title with surrounding whitespace equals prompt", title: "  do X  ", firstUserMessage: "do X", want: ""},
+		{name: "empty title", title: "", firstUserMessage: "anything", want: ""},
+		{name: "whitespace-only title", title: "   ", firstUserMessage: "anything", want: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, codexThreadName(tc.title, tc.firstUserMessage))
+		})
+	}
+}
+
+func TestParseRenameArgs(t *testing.T) {
+	cases := []struct {
+		name      string
+		content   string
+		want      string
+		wantFound bool
+	}{
+		{
+			name:      "input event with name",
+			content:   "<command-name>/rename</command-name>\n<command-message>rename</command-message>\n<command-args>fix-thing</command-args>",
+			want:      "fix-thing",
+			wantFound: true,
+		},
+		{
+			name:      "input event with empty args (clear)",
+			content:   "<command-name>/rename</command-name>\n<command-args></command-args>",
+			want:      "",
+			wantFound: true,
+		},
+		{
+			name:      "stdout event has no command-args",
+			content:   "<local-command-stdout>Session renamed to: foo</local-command-stdout>",
+			want:      "",
+			wantFound: false,
+		},
+		{
+			name:      "different command",
+			content:   "<command-name>/status</command-name>\n<command-args>x</command-args>",
+			want:      "",
+			wantFound: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseRenameArgs(tc.content)
+			assert.Equal(t, tc.wantFound, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestReadClaudeNameFromTranscript(t *testing.T) {
+	claudeDir := t.TempDir()
+	projectPath := "/home/u/repo"
+	sessionID := "sess-1"
+	dirName := "-home-u-repo"
+	transcriptDir := filepath.Join(claudeDir, "projects", dirName)
+	require.NoError(t, os.MkdirAll(transcriptDir, 0o755))
+
+	// Two /rename events: the second (latest) wins.
+	lines := []string{
+		`{"type":"user","message":"hello","sessionId":"sess-1"}`,
+		`{"type":"system","subtype":"local_command","content":"<command-name>/rename</command-name>\n<command-args>first-name</command-args>"}`,
+		`{"type":"system","subtype":"local_command","content":"<local-command-stdout>Session renamed to: first-name</local-command-stdout>"}`,
+		`{"type":"system","subtype":"local_command","content":"<command-name>/rename</command-name>\n<command-args>final-name</command-args>"}`,
+	}
+	jsonlPath := filepath.Join(transcriptDir, sessionID+".jsonl")
+	require.NoError(t, os.WriteFile(jsonlPath, []byte(strings.Join(lines, "\n")), 0o644))
+
+	name, ok := readClaudeNameFromTranscript(claudeDir, projectPath, sessionID)
+	assert.True(t, ok)
+	assert.Equal(t, "final-name", name)
+
+	// Missing file: returns ("", false)
+	name, ok = readClaudeNameFromTranscript(claudeDir, projectPath, "missing")
+	assert.False(t, ok)
+	assert.Equal(t, "", name)
+
+	// Latest /rename clears the name.
+	clearedID := "sess-2"
+	clearedLines := []string{
+		`{"type":"system","subtype":"local_command","content":"<command-name>/rename</command-name>\n<command-args>old-name</command-args>"}`,
+		`{"type":"system","subtype":"local_command","content":"<command-name>/rename</command-name>\n<command-args></command-args>"}`,
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(transcriptDir, clearedID+".jsonl"),
+		[]byte(strings.Join(clearedLines, "\n")), 0o644))
+	name, ok = readClaudeNameFromTranscript(claudeDir, projectPath, clearedID)
+	assert.True(t, ok, "explicit clear should still report found")
+	assert.Equal(t, "", name)
 }
 
 func TestSelectCompactText(t *testing.T) {

@@ -94,6 +94,8 @@ func AgentList(m *manifest.Manifest, wsHome, filter string, includeWorktrees boo
 		sessions = truncatePreservingPins(sessions, limit)
 	}
 
+	enrichSessionNames(sessions)
+
 	if mode.needsEnrichment() {
 		enrichSessionVerboseInfo(sessions)
 	}
@@ -466,6 +468,31 @@ func filterSessionsByRepo(sessions []AgentSession, repoName string) []AgentSessi
 		}
 	}
 	return filtered
+}
+
+// enrichSessionNames fills in Name for displayed sessions whose live
+// metadata file no longer exists by scanning their conversation
+// transcript for the most recent /rename event. The transcript persists
+// after the agent process exits, while ~/.claude/sessions/<pid>.json
+// does not.
+func enrichSessionNames(sessions []AgentSession) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	claudeDir := filepath.Join(home, ".claude")
+
+	for i := range sessions {
+		if sessions[i].Name != "" {
+			continue
+		}
+		switch sessions[i].Agent {
+		case agentClaude:
+			if name, ok := readClaudeNameFromTranscript(claudeDir, sessions[i].Dir, sessions[i].SessionID); ok {
+				sessions[i].Name = name
+			}
+		}
+	}
 }
 
 func enrichSessionVerboseInfo(sessions []AgentSession) {
