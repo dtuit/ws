@@ -475,7 +475,15 @@ repos:
 	require.NoError(t, err)
 
 	index := buildPathIndex(m, "/tmp/ws", agentFilterRoot, false)
-	assert.Equal(t, map[string]string{"/tmp/ws": "(root)"}, index)
+	assert.Equal(t, map[string]string{"/tmp/ws": "ws"}, index)
+}
+
+func TestWorkspaceRootRepoName(t *testing.T) {
+	assert.Equal(t, "ws", workspaceRootRepoName("/tmp/ws"))
+	assert.Equal(t, "xtracta-workspace", workspaceRootRepoName("/home/u/code/xtracta-workspace"))
+	assert.Equal(t, "workspace", workspaceRootRepoName(""))
+	assert.Equal(t, "workspace", workspaceRootRepoName("/"))
+	assert.Equal(t, "workspace", workspaceRootRepoName("."))
 }
 
 func TestReconcileClaudePermissionFlag(t *testing.T) {

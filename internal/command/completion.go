@@ -333,7 +333,7 @@ func completeAgentCommand(m *manifest.Manifest, args []string, current int) Comp
 	}
 	currentWord := completionWord(args, current)
 	if current == 0 {
-		values := []string{"list", "ls", "resume", "pin", "unpin", "--agent", "-a"}
+		values := []string{"list", "ls", "search", "resume", "pin", "unpin", "--agent", "-a"}
 		values = append(values, repoSuggestions(m)...)
 		return finalizeCompletion(values, currentWord, false)
 	}
@@ -348,6 +348,16 @@ func completeAgentCommand(m *manifest.Manifest, args []string, current int) Comp
 			}
 		}
 		return result
+	}
+	if len(args) > 0 && args[0] == "search" {
+		flags := []string{"--external", "-v", "--verbose", "-n"}
+		var values []string
+		for _, f := range flags {
+			if strings.HasPrefix(f, currentWord) {
+				values = append(values, f)
+			}
+		}
+		return finalizeCompletion(values, currentWord, false)
 	}
 	return finalizeCompletion(repoSuggestions(m), currentWord, false)
 }
