@@ -15,7 +15,9 @@ const (
 	legacyContextFile         = ".ws-context"
 	legacyResolvedContextFile = ".ws-context.resolved"
 
-	contextStateFile = "context.yml"
+	contextStateFile   = "context.yml"
+	scopeHintFile      = "scope.yml"
+	workspacesStateDir = "workspaces"
 )
 
 type contextState struct {
@@ -27,12 +29,46 @@ type contextState struct {
 	Previous *string `yaml:"previous,omitempty"`
 }
 
+func activeWorkspaceName() string {
+	return strings.TrimSpace(os.Getenv("WS_WORKSPACE"))
+}
+
+func workspaceContextStateFile(workspace string) string {
+	if workspace == "" {
+		return contextStateFile
+	}
+	return filepath.Join(workspacesStateDir, workspace, contextStateFile)
+}
+
+func workspaceScopeHintStateFile(workspace string) string {
+	if workspace == "" {
+		return scopeHintFile
+	}
+	return filepath.Join(workspacesStateDir, workspace, scopeHintFile)
+}
+
 func loadStoredContextState(wsHome string) (contextState, bool, error) {
-	return readContextState(stateReadPath(wsHome, contextStateFile, legacyContextFile))
+	return loadWorkspaceContextState(wsHome, activeWorkspaceName())
 }
 
 func saveStoredContextState(wsHome, raw string, repos []manifest.RepoInfo, previous *string) error {
-	path, err := stateWritePath(wsHome, contextStateFile, legacyContextFile)
+	return saveWorkspaceContextState(wsHome, activeWorkspaceName(), raw, repos, previous)
+}
+
+func loadWorkspaceContextState(wsHome, workspace string) (contextState, bool, error) {
+	legacy := ""
+	if workspace == "" {
+		legacy = legacyContextFile
+	}
+	return readContextState(stateReadPath(wsHome, workspaceContextStateFile(workspace), legacy))
+}
+
+func saveWorkspaceContextState(wsHome, workspace, raw string, repos []manifest.RepoInfo, previous *string) error {
+	legacy := ""
+	if workspace == "" {
+		legacy = legacyContextFile
+	}
+	path, err := stateWritePath(wsHome, workspaceContextStateFile(workspace), legacy)
 	if err != nil {
 		return err
 	}

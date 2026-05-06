@@ -31,12 +31,12 @@ func stateReadPath(wsHome, newName, legacyName string) string {
 // .ws/ directory if missing and removing any legacy flat file so the state
 // migrates on first write.
 func stateWritePath(wsHome, newName, legacyName string) (string, error) {
-	dir := filepath.Join(wsHome, wsStateDir)
+	dir := filepath.Join(wsHome, wsStateDir, filepath.Dir(newName))
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
 	if legacyName != "" {
 		_ = os.Remove(filepath.Join(wsHome, legacyName))
 	}
-	return filepath.Join(dir, newName), nil
+	return filepath.Join(wsHome, wsStateDir, newName), nil
 }

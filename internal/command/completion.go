@@ -9,17 +9,47 @@ import (
 )
 
 // CompletionResult describes completion candidates and any shell fallback.
+//
+// Values is the authoritative list of candidates, prefix-filtered against the
+// current word. Groups and Descriptions are optional metadata keyed by value:
+// when the consuming shell can render groups (zsh via _describe) we surface
+// them; bash ignores both and just shows values.
 type CompletionResult struct {
 	Values           []string
+	Groups           map[string]string // value -> group label (e.g. "flags", "repos")
+	Descriptions     map[string]string // value -> short help text shown next to value
 	FallbackCommands bool
 	DelegateCommands bool
 	DelegateStart    int
 }
 
+// Standard group labels used by the migrated handlers. Free-form strings work
+// too; these constants just keep ordering consistent across commands.
+const (
+	GroupSubcommands = "subcommands"
+	GroupFlags       = "flags"
+	GroupFilters     = "filter tokens"
+	GroupGroups      = "groups"
+	GroupWorkspaces  = "workspaces"
+	GroupRepos       = "repos"
+	GroupRemotes     = "remotes"
+)
+
 // CompletionHandler returns shell completion candidates for one built-in command.
 type CompletionHandler func(m *manifest.Manifest, args []string, current int) CompletionResult
 
 // CompletionOutput renders completion lines, including shell delegation markers.
+//
+// Output protocol:
+//   - Single sentinel line for delegate/fallback (unchanged).
+//   - Otherwise one line per candidate, tab-separated:
+//     <group>\t<value>\t<description>
+//     Empty group/description fields are allowed. Bash strips to <value>;
+//     zsh groups by <group> and shows <description> via _describe.
+//
+// Lines are emitted in (groupPriority, value) order so the zsh script's
+// "discover groups in order of first appearance" rule produces a stable
+// section ordering that puts the most useful sections first.
 func CompletionOutput(m *manifest.Manifest, words []string, current int) []string {
 	result := Complete(m, words, current)
 	if result.DelegateCommands {
@@ -28,7 +58,66 @@ func CompletionOutput(m *manifest.Manifest, words []string, current int) []strin
 	if result.FallbackCommands {
 		return []string{CompletionCommandFallbackSentinel}
 	}
-	return result.Values
+
+	type row struct {
+		group, value, desc string
+		priority           int
+	}
+	rows := make([]row, 0, len(result.Values))
+	for _, v := range result.Values {
+		group := ""
+		desc := ""
+		if result.Groups != nil {
+			group = result.Groups[v]
+		}
+		if result.Descriptions != nil {
+			desc = result.Descriptions[v]
+		}
+		rows = append(rows, row{
+			group:    group,
+			value:    v,
+			desc:     desc,
+			priority: groupPriority(group),
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].priority != rows[j].priority {
+			return rows[i].priority < rows[j].priority
+		}
+		return rows[i].value < rows[j].value
+	})
+
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, fmt.Sprintf("%s\t%s\t%s", r.group, r.value, r.desc))
+	}
+	return out
+}
+
+// groupPriority returns the display rank for a group label. Lower numbers
+// surface first in the completion menu. Unknown labels sort after the
+// known ones (in alphabetic order via the value tiebreaker).
+func groupPriority(group string) int {
+	switch group {
+	case GroupFlags:
+		return 0
+	case GroupSubcommands:
+		return 1
+	case GroupFilters:
+		return 2
+	case GroupGroups:
+		return 3
+	case GroupWorkspaces:
+		return 4
+	case GroupRemotes:
+		return 5
+	case GroupRepos:
+		return 6
+	case "":
+		return 99
+	default:
+		return 50
+	}
 }
 
 // Complete returns shell completion candidates for ws arguments.
@@ -49,9 +138,47 @@ func Complete(m *manifest.Manifest, words []string, current int) CompletionResul
 	}
 
 	if commandIndex >= len(words) || current == commandIndex {
-		values := append(globalFlagSuggestions(), BuiltinCommandSuggestions()...)
-		values = append(values, filterSuggestions(m)...)
-		return finalizeCompletion(values, currentWord, true)
+		flags := globalFlagSuggestions()
+		commands := BuiltinCommandSuggestions()
+		filters, fGroups, fDescs := filterSuggestionsWithMeta(m)
+
+		// Comma-aware: once the user is mid-list (`ai,…`), only filter tokens
+		// make sense — drop flags and commands.
+		if head, tail := splitCommaWord(currentWord); head != "" {
+			return commaAwareFilter(head, tail, filters, fGroups, fDescs)
+		}
+
+		values := append([]string{}, flags...)
+		values = append(values, commands...)
+		values = append(values, filters...)
+
+		groups := map[string]string{}
+		descriptions := map[string]string{}
+		for _, f := range flags {
+			groups[f] = GroupFlags
+		}
+		descriptions["-w"] = "Workspace dir override"
+		descriptions["--workspace"] = "Workspace dir override"
+		descriptions["-t"] = "Include linked worktrees"
+		descriptions["--worktrees"] = "Include linked worktrees"
+		descriptions["--no-worktrees"] = "Force primary checkouts only"
+		descriptions["-h"] = "Show usage"
+		descriptions["--help"] = "Show usage"
+		descriptions["--version"] = "Print ws version"
+
+		for _, c := range commands {
+			groups[c] = GroupSubcommands
+			if entry, ok := builtinCommandByName(c); ok && entry.Summary.Description != "" {
+				descriptions[c] = entry.Summary.Description
+			}
+		}
+		for k, v := range fGroups {
+			groups[k] = v
+		}
+		for k, v := range fDescs {
+			descriptions[k] = v
+		}
+		return withMetadata(finalizeCompletion(values, currentWord, true), groups, descriptions)
 	}
 
 	cmd := ResolveBuiltinCommandName(words[commandIndex])
@@ -100,25 +227,104 @@ func completeCDCommand(m *manifest.Manifest, args []string, current int) Complet
 	currentWord := completionWord(args, current)
 	switch current {
 	case 0:
-		return finalizeCompletion(repoSuggestions(m), currentWord, false)
+		return reposOnlySuggestion(m, currentWord)
 	case 1:
-		return finalizeCompletion([]string{"--worktree", "-t"}, currentWord, false)
+		flags := []string{"--worktree", "-t"}
+		return withMetadata(
+			finalizeCompletion(flags, currentWord, false),
+			map[string]string{"--worktree": GroupFlags, "-t": GroupFlags},
+			map[string]string{"--worktree": "Select a worktree by name/branch", "-t": "Select a worktree by name/branch"},
+		)
 	default:
 		return CompletionResult{}
 	}
 }
 
 func completeReposCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
-	return finalizeCompletion(append([]string{"--all", "-a"}, worktreesFlagSuggestions()...), completionWord(args, current), false)
+	flags := append([]string{"--all", "-a"}, worktreesFlagSuggestions()...)
+	groups := map[string]string{}
+	for _, f := range flags {
+		groups[f] = GroupFlags
+	}
+	descs := map[string]string{
+		"--all":          "Include excluded repos",
+		"-a":             "Include excluded repos",
+		"-t":             "Include linked worktrees",
+		"--worktrees":    "Include linked worktrees",
+		"--no-worktrees": "Force primary checkouts only",
+	}
+	return withMetadata(finalizeCompletion(flags, completionWord(args, current), false), groups, descs)
 }
 
 func completeBrowseCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
 	currentWord := completionWord(args, current)
 	if current == 0 {
-		values := append([]string{".", "--yes", "-y"}, repoSuggestions(m)...)
-		return finalizeCompletion(values, currentWord, false)
+		flags := []string{".", "--yes", "-y"}
+		repos := repoSuggestions(m)
+		values := append(append([]string{}, flags...), repos...)
+		groups := map[string]string{
+			".":     GroupFilters,
+			"--yes": GroupFlags,
+			"-y":    GroupFlags,
+		}
+		descs := map[string]string{
+			".":     "Current directory's repo",
+			"--yes": "Skip confirmation prompt",
+			"-y":    "Skip confirmation prompt",
+		}
+		for _, r := range repos {
+			groups[r] = GroupRepos
+		}
+		return withMetadata(finalizeCompletion(values, currentWord, false), groups, descs)
 	}
-	return finalizeCompletion([]string{"--yes", "-y"}, currentWord, false)
+	return withMetadata(
+		finalizeCompletion([]string{"--yes", "-y"}, currentWord, false),
+		map[string]string{"--yes": GroupFlags, "-y": GroupFlags},
+		map[string]string{"--yes": "Skip confirmation prompt", "-y": "Skip confirmation prompt"},
+	)
+}
+
+// reposOnlySuggestion returns just the repo list with the GroupRepos label.
+func reposOnlySuggestion(m *manifest.Manifest, currentWord string) CompletionResult {
+	repos := repoSuggestions(m)
+	groups := map[string]string{}
+	for _, r := range repos {
+		groups[r] = GroupRepos
+	}
+	return withMetadata(finalizeCompletion(repos, currentWord, false), groups, nil)
+}
+
+func completeOpenCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current < 0 {
+		return CompletionResult{}
+	}
+
+	currentWord := completionWord(args, current)
+	if current > 0 && (args[current-1] == "--editor" || args[current-1] == "-e") {
+		return CompletionResult{}
+	}
+
+	flags := []string{"--editor", "-e"}
+	workspaceNames := workspacePresetNames(m)
+	values := append([]string{}, flags...)
+	values = append(values, workspaceNames...)
+
+	groups := map[string]string{
+		"--editor": GroupFlags,
+		"-e":       GroupFlags,
+	}
+	descs := map[string]string{
+		"--editor": "Open with a specific editor command",
+		"-e":       "Open with a specific editor command",
+	}
+	for _, name := range workspaceNames {
+		groups[name] = GroupWorkspaces
+		if filter, ok := m.Workspaces[name]; ok {
+			descs[name] = filter
+		}
+	}
+
+	return withMetadata(finalizeCompletion(values, currentWord, false), groups, descs)
 }
 
 func completeAgentCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
@@ -152,18 +358,82 @@ func completeDirsCommand(m *manifest.Manifest, args []string, current int) Compl
 }
 
 func completeSetupCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
-	if current == 0 {
-		values := append([]string{"--all", "-a"}, filterSuggestions(m)...)
-		return finalizeCompletion(values, completionWord(args, current), false)
+	if current != 0 {
+		return CompletionResult{}
 	}
-	return CompletionResult{}
+	flags := []string{"--all", "-a"}
+	currentWord := completionWord(args, current)
+	result := filterAndFlagsSuggestion(m, flags, currentWord)
+	if _, ok := indexValues(result.Values, "--all"); ok {
+		if result.Descriptions == nil {
+			result.Descriptions = map[string]string{}
+		}
+		result.Descriptions["--all"] = "Clone every active repo"
+		result.Descriptions["-a"] = "Clone every active repo"
+	}
+	return result
 }
 
 func completeFetchCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
-	if current == 0 {
-		return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
+	if current < 0 {
+		return CompletionResult{}
 	}
-	return CompletionResult{}
+	currentWord := completionWord(args, current)
+
+	// Position immediately after a `--remote` token: complete the remote name.
+	if current > 0 && args[current-1] == "--remote" {
+		names := remoteNameSuggestions(m)
+		groups := map[string]string{}
+		for _, n := range names {
+			groups[n] = GroupRemotes
+		}
+		return withMetadata(finalizeCompletion(names, currentWord, false), groups, nil)
+	}
+
+	// --remote flag + filter tokens. --remote can repeat so it's valid at any
+	// later position too.
+	flags := []string{"--remote"}
+	descs := map[string]string{"--remote": "Fetch a specific remote (repeatable)"}
+	result := filterAndFlagsSuggestion(m, flags, currentWord)
+	for v, d := range descs {
+		if result.Descriptions == nil {
+			result.Descriptions = map[string]string{}
+		}
+		if _, ok := indexValues(result.Values, v); ok {
+			result.Descriptions[v] = d
+		}
+	}
+	return result
+}
+
+// indexValues reports whether v is in values (linear scan; values are short).
+func indexValues(values []string, v string) (int, bool) {
+	for i, item := range values {
+		if item == v {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// remoteNameSuggestions returns the union of remote names declared across all
+// active repos in the manifest (e.g. origin, upstream, …).
+func remoteNameSuggestions(m *manifest.Manifest) []string {
+	if m == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for name, cfg := range m.ActiveRepos() {
+		for k := range m.ResolveRemotes(name, cfg) {
+			seen[k] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func completeLLCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
@@ -179,8 +449,7 @@ func completeFilterCommand(m *manifest.Manifest, args []string, current int, fla
 		return CompletionResult{}
 	}
 	if current == 0 {
-		values := append(flags, filterSuggestions(m)...)
-		return finalizeCompletion(values, completionWord(args, current), false)
+		return filterAndFlagsSuggestion(m, flags, completionWord(args, current))
 	}
 
 	seenFlag := false
@@ -188,7 +457,7 @@ func completeFilterCommand(m *manifest.Manifest, args []string, current int, fla
 	for i, arg := range args {
 		if hasFlag(flags, arg) {
 			if i == current {
-				return finalizeCompletion(flags, completionWord(args, current), false)
+				return flagsOnlySuggestion(flags, completionWord(args, current))
 			}
 			seenFlag = true
 			continue
@@ -198,7 +467,7 @@ func completeFilterCommand(m *manifest.Manifest, args []string, current int, fla
 		}
 		if i == current {
 			if filterIndex == 0 {
-				return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
+				return filterOnlySuggestion(m, completionWord(args, current))
 			}
 			return CompletionResult{}
 		}
@@ -206,10 +475,46 @@ func completeFilterCommand(m *manifest.Manifest, args []string, current int, fla
 	}
 
 	if seenFlag && current == len(args) {
-		return finalizeCompletion(filterSuggestions(m), "", false)
+		return filterOnlySuggestion(m, "")
 	}
 
 	return CompletionResult{}
+}
+
+// filterAndFlagsSuggestion combines filter tokens (with group metadata) and
+// the given flag list. When currentWord is mid-comma (e.g. `ai,re`), flags
+// drop out and only filter tokens are offered, comma-prefixed.
+func filterAndFlagsSuggestion(m *manifest.Manifest, flags []string, currentWord string) CompletionResult {
+	filters, fGroups, fDescs := filterSuggestionsWithMeta(m)
+	if head, tail := splitCommaWord(currentWord); head != "" {
+		return commaAwareFilter(head, tail, filters, fGroups, fDescs)
+	}
+	values := append([]string{}, flags...)
+	values = append(values, filters...)
+	groups := map[string]string{}
+	for _, f := range flags {
+		groups[f] = GroupFlags
+	}
+	for k, v := range fGroups {
+		groups[k] = v
+	}
+	return withMetadata(finalizeCompletion(values, currentWord, false), groups, fDescs)
+}
+
+func flagsOnlySuggestion(flags []string, currentWord string) CompletionResult {
+	groups := map[string]string{}
+	for _, f := range flags {
+		groups[f] = GroupFlags
+	}
+	return withMetadata(finalizeCompletion(flags, currentWord, false), groups, nil)
+}
+
+func filterOnlySuggestion(m *manifest.Manifest, currentWord string) CompletionResult {
+	values, groups, descs := filterSuggestionsWithMeta(m)
+	if head, tail := splitCommaWord(currentWord); head != "" {
+		return commaAwareFilter(head, tail, values, groups, descs)
+	}
+	return withMetadata(finalizeCompletion(values, currentWord, false), groups, descs)
 }
 
 func completeShellCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
@@ -217,7 +522,46 @@ func completeShellCommand(_ *manifest.Manifest, args []string, current int) Comp
 		return CompletionResult{}
 	}
 	if current == 0 {
-		return finalizeCompletion([]string{"init", "install"}, completionWord(args, current), false)
+		return withMetadata(
+			finalizeCompletion([]string{"init", "install"}, completionWord(args, current), false),
+			map[string]string{"init": GroupSubcommands, "install": GroupSubcommands},
+			map[string]string{
+				"init":    "Emit shell integration to stdout",
+				"install": "Write shell integration into ~/.bashrc or ~/.zshrc",
+			},
+		)
+	}
+	return CompletionResult{}
+}
+
+func completeUpgradeCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
+	if current != 0 {
+		return CompletionResult{}
+	}
+	return withMetadata(
+		finalizeCompletion([]string{"--check"}, completionWord(args, current), false),
+		map[string]string{"--check": GroupFlags},
+		map[string]string{"--check": "Compare against latest release"},
+	)
+}
+
+func completeRemotesCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current == 0 {
+		return withMetadata(
+			finalizeCompletion([]string{"sync"}, completionWord(args, current), false),
+			map[string]string{"sync": GroupSubcommands},
+			map[string]string{"sync": "Reconcile manifest remotes against checkouts"},
+		)
+	}
+	if len(args) > 0 && args[0] == "sync" && current == 1 {
+		return filterOnlySuggestion(m, completionWord(args, current))
+	}
+	return CompletionResult{}
+}
+
+func completeRepairRefspecsCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current == 0 {
+		return filterOnlySuggestion(m, completionWord(args, current))
 	}
 	return CompletionResult{}
 }
@@ -249,47 +593,147 @@ func completeContextCommand(m *manifest.Manifest, args []string, current int) Co
 		nonFlags = append(nonFlags, arg)
 	}
 
+	subcommands := []struct{ name, desc string }{
+		{"set", "Set the default filter scope"},
+		{"add", "Extend the current context"},
+		{"remove", "Remove repos from the current context"},
+		{"refresh", "Re-resolve and rebuild scope symlinks"},
+		{".", "Shorthand for refresh"},
+		{"save", "Persist the current context as a named group"},
+		{"none", "Clear the context"},
+		{"reset", "Clear the context"},
+		{"-", "Swap to the previous context"},
+		{"prev", "Swap to the previous context"},
+	}
+
 	if len(nonFlags) == 0 {
-		values := append(flags, filterSuggestions(m)...)
-		values = append(values, "none", "reset", "add", "remove", "save", "refresh", ".", "-", "prev")
-		return finalizeCompletion(values, currentWord, false)
+		filterValues, fGroups, fDescs := filterSuggestionsWithMeta(m)
+		// Comma-aware: drop flags + subcommands once the user is mid-list.
+		if head, tail := splitCommaWord(currentWord); head != "" {
+			return commaAwareFilter(head, tail, filterValues, fGroups, fDescs)
+		}
+		values := append([]string{}, flags...)
+		for _, sc := range subcommands {
+			values = append(values, sc.name)
+		}
+		values = append(values, filterValues...)
+
+		groups := map[string]string{}
+		descriptions := map[string]string{}
+		for _, f := range flags {
+			groups[f] = GroupFlags
+		}
+		descriptions["-t"] = "Include linked worktrees"
+		descriptions["--worktrees"] = "Include linked worktrees"
+		descriptions["--no-worktrees"] = "Force primary checkouts only"
+		for _, sc := range subcommands {
+			groups[sc.name] = GroupSubcommands
+			descriptions[sc.name] = sc.desc
+		}
+		for k, v := range fGroups {
+			groups[k] = v
+		}
+		for k, v := range fDescs {
+			descriptions[k] = v
+		}
+		return withMetadata(finalizeCompletion(values, currentWord, false), groups, descriptions)
 	}
 
 	if nonFlags[0] == "save" {
-		values := []string{}
-		if !seenLocal {
-			values = append(values, "--local")
+		if seenLocal {
+			return CompletionResult{}
 		}
-		return finalizeCompletion(values, currentWord, false)
+		return withMetadata(
+			finalizeCompletion([]string{"--local"}, currentWord, false),
+			map[string]string{"--local": GroupFlags},
+			map[string]string{"--local": "Save into manifest.local.yml"},
+		)
 	}
 
 	if nonFlags[0] == "add" || nonFlags[0] == "remove" {
-		values := append(flags, filterSuggestions(m)...)
-		return finalizeCompletion(values, currentWord, false)
+		return filterAndFlagsSuggestion(m, flags, currentWord)
 	}
 	if nonFlags[0] == "refresh" || nonFlags[0] == "." {
-		return finalizeCompletion(flags, currentWord, false)
+		return flagsOnlySuggestion(flags, currentWord)
 	}
 
-	values := append(flags, filterSuggestions(m)...)
-	return finalizeCompletion(values, currentWord, false)
+	return filterAndFlagsSuggestion(m, flags, currentWord)
+}
+
+func completeWorkspaceCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
+	if current < 0 {
+		return CompletionResult{}
+	}
+
+	currentWord := completionWord(args, current)
+	subs := []string{"list", "ls", "use", "clear", "unset"}
+	descs := map[string]string{
+		"list":  "List saved workspace presets",
+		"ls":    "List saved workspace presets",
+		"use":   "Activate a named workspace in this shell",
+		"clear": "Clear the active shell workspace",
+		"unset": "Clear the active shell workspace",
+	}
+	if current == 0 {
+		groups := map[string]string{}
+		for _, s := range subs {
+			groups[s] = GroupSubcommands
+		}
+		return withMetadata(finalizeCompletion(subs, currentWord, false), groups, descs)
+	}
+
+	if len(args) > 0 && args[0] == "use" && current == 1 {
+		names := workspacePresetNames(m)
+		groups := map[string]string{}
+		workspaceDescs := map[string]string{}
+		for _, name := range names {
+			groups[name] = GroupWorkspaces
+			workspaceDescs[name] = m.Workspaces[name]
+		}
+		return withMetadata(finalizeCompletion(names, currentWord, false), groups, workspaceDescs)
+	}
+
+	return CompletionResult{}
 }
 
 func completeMuxCommand(_ *manifest.Manifest, args []string, current int) CompletionResult {
-	if current == 0 {
-		return finalizeCompletion([]string{"dup", "kill", "list", "ls", "save"}, completionWord(args, current), false)
+	if current != 0 {
+		return CompletionResult{}
 	}
-	return CompletionResult{}
+	subs := []string{"dup", "kill", "list", "ls", "save"}
+	descs := map[string]string{
+		"dup":  "Duplicate a window/tab in the active session",
+		"kill": "Kill a session",
+		"list": "List multiplexer sessions",
+		"ls":   "List multiplexer sessions",
+		"save": "Persist current layout to manifest",
+	}
+	groups := map[string]string{}
+	for _, s := range subs {
+		groups[s] = GroupSubcommands
+	}
+	return withMetadata(finalizeCompletion(subs, completionWord(args, current), false), groups, descs)
 }
 
 func completeWorktreeCommand(m *manifest.Manifest, args []string, current int) CompletionResult {
 	if current == 0 {
-		return finalizeCompletion([]string{"add", "remove", "list", "ls"}, completionWord(args, current), false)
+		subs := []string{"add", "remove", "list", "ls"}
+		descs := map[string]string{
+			"add":    "Create linked worktrees for a branch",
+			"remove": "Remove linked worktrees",
+			"list":   "List worktrees per repo",
+			"ls":     "List worktrees per repo",
+		}
+		groups := map[string]string{}
+		for _, s := range subs {
+			groups[s] = GroupSubcommands
+		}
+		return withMetadata(finalizeCompletion(subs, completionWord(args, current), false), groups, descs)
 	}
 	if current >= 2 && len(args) > 0 {
 		action := args[0]
 		if action == "add" || action == "remove" || action == "list" || action == "ls" {
-			return finalizeCompletion(filterSuggestions(m), completionWord(args, current), false)
+			return filterOnlySuggestion(m, completionWord(args, current))
 		}
 	}
 	return CompletionResult{}
@@ -358,6 +802,36 @@ func finalizeCompletion(values []string, currentWord string, allowCommandFallbac
 	return CompletionResult{Values: filtered}
 }
 
+// withMetadata is a helper for handlers that want to attach group/description
+// metadata to a result built via finalizeCompletion. It only retains entries
+// whose value survived prefix filtering.
+func withMetadata(r CompletionResult, groups, descriptions map[string]string) CompletionResult {
+	if r.FallbackCommands || r.DelegateCommands || len(r.Values) == 0 {
+		return r
+	}
+	keep := make(map[string]struct{}, len(r.Values))
+	for _, v := range r.Values {
+		keep[v] = struct{}{}
+	}
+	if groups != nil {
+		r.Groups = make(map[string]string, len(r.Values))
+		for v, g := range groups {
+			if _, ok := keep[v]; ok && g != "" {
+				r.Groups[v] = g
+			}
+		}
+	}
+	if descriptions != nil {
+		r.Descriptions = make(map[string]string, len(r.Values))
+		for v, d := range descriptions {
+			if _, ok := keep[v]; ok && d != "" {
+				r.Descriptions[v] = d
+			}
+		}
+	}
+	return r
+}
+
 func completionWord(args []string, current int) string {
 	if current < 0 || current >= len(args) {
 		return ""
@@ -389,32 +863,70 @@ func globalFlagSuggestions() []string {
 }
 
 func filterSuggestions(m *manifest.Manifest) []string {
-	values := []string{
-		"all",
-		activeFilterToken,
-		activeFilterToken + ":1d",
-		dirtyFilterToken,
-		mineFilterToken + ":1d",
+	values, _, _ := filterSuggestionsWithMeta(m)
+	return values
+}
+
+// filterSuggestionsWithMeta returns the filter suggestion list plus
+// group/description maps suitable for `withMetadata`.
+//
+// Groups are emitted as "filter tokens" (the activity-style filters), "groups"
+// (manifest groups), and "repos". Descriptions for groups list the first few
+// member repos so the user can see what's behind a group name.
+func filterSuggestionsWithMeta(m *manifest.Manifest) (values []string, groups, descriptions map[string]string) {
+	groups = map[string]string{}
+	descriptions = map[string]string{}
+
+	tokens := []struct{ value, desc string }{
+		{"all", "Every active repo"},
+		{activeFilterToken, "Recently active repos (default 14d)"},
+		{activeFilterToken + ":1d", "Active within last day"},
+		{dirtyFilterToken, "Repos with uncommitted changes"},
+		{mineFilterToken + ":1d", "Repos with your commits within 1 day"},
+	}
+	for _, t := range tokens {
+		values = append(values, t.value)
+		groups[t.value] = GroupFilters
+		descriptions[t.value] = t.desc
 	}
 	if m == nil {
-		return values
+		return values, groups, descriptions
 	}
 
 	groupNames := make([]string, 0, len(m.Groups))
-	for group := range m.Groups {
-		groupNames = append(groupNames, group)
+	for g := range m.Groups {
+		groupNames = append(groupNames, g)
 	}
 	sort.Strings(groupNames)
-	values = append(values, groupNames...)
+	for _, g := range groupNames {
+		values = append(values, g)
+		groups[g] = GroupGroups
+		descriptions[g] = describeGroupMembers(m.Groups[g])
+	}
 
 	repoNames := make([]string, 0, len(m.ActiveRepos()))
 	for name := range m.ActiveRepos() {
 		repoNames = append(repoNames, name)
 	}
 	sort.Strings(repoNames)
-	values = append(values, repoNames...)
+	for _, r := range repoNames {
+		values = append(values, r)
+		groups[r] = GroupRepos
+	}
+	return values, groups, descriptions
+}
 
-	return values
+// describeGroupMembers builds a short "a, b, c, +N more" summary so users
+// can tell groups apart in completion menus.
+func describeGroupMembers(members []string) string {
+	if len(members) == 0 {
+		return ""
+	}
+	const max = 3
+	if len(members) <= max {
+		return strings.Join(members, ", ")
+	}
+	return strings.Join(members[:max], ", ") + fmt.Sprintf(", +%d more", len(members)-max)
 }
 
 func repoSuggestions(m *manifest.Manifest) []string {
@@ -476,4 +988,73 @@ func hasFlag(flags []string, token string) bool {
 		}
 	}
 	return false
+}
+
+// splitCommaWord splits currentWord at the last comma. head includes the
+// trailing comma so callers can simply prepend it to candidates; tail is the
+// unfinished segment after the comma. For words without a comma, head is
+// empty and tail is the whole currentWord.
+func splitCommaWord(currentWord string) (head, tail string) {
+	if idx := strings.LastIndex(currentWord, ","); idx >= 0 {
+		return currentWord[:idx+1], currentWord[idx+1:]
+	}
+	return "", currentWord
+}
+
+// commaHeadParts returns the comma-separated tokens already chosen in head
+// (head minus its trailing comma, split on `,` and trimmed). Used to de-dupe
+// candidates so a token already in the list doesn't reappear.
+func commaHeadParts(head string) []string {
+	head = strings.TrimSuffix(head, ",")
+	if head == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(head, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// commaAwareFilter renders the next filter-token candidate for a mid-list
+// completion (`<head>,…`). Candidates are filtered against tail, de-duped
+// against segments already in head, and prefixed with head so the shell
+// replaces the whole current word atomically. Flag candidates are dropped:
+// they can't appear inside a comma-separated filter.
+func commaAwareFilter(head, tail string, filterValues []string, filterGroups, filterDescs map[string]string) CompletionResult {
+	chosen := make(map[string]struct{}, 4)
+	for _, p := range commaHeadParts(head) {
+		chosen[p] = struct{}{}
+	}
+	var values []string
+	groups := map[string]string{}
+	descs := map[string]string{}
+	seen := make(map[string]struct{}, len(filterValues))
+	for _, v := range filterValues {
+		if v == "" {
+			continue
+		}
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		if _, taken := chosen[v]; taken {
+			continue
+		}
+		if tail != "" && !strings.HasPrefix(v, tail) {
+			continue
+		}
+		rewritten := head + v
+		values = append(values, rewritten)
+		if g := filterGroups[v]; g != "" {
+			groups[rewritten] = g
+		}
+		if d := filterDescs[v]; d != "" {
+			descs[rewritten] = d
+		}
+	}
+	sort.Strings(values)
+	return CompletionResult{Values: values, Groups: groups, Descriptions: descs}
 }

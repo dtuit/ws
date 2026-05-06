@@ -16,6 +16,7 @@ func TestBuiltinCommandNames(t *testing.T) {
 		CommandShell,
 		CommandUpgrade,
 		CommandOpen,
+		CommandWorkspace,
 		CommandBrowse,
 		CommandRepos,
 		CommandDirs,
@@ -33,6 +34,8 @@ func TestBuiltinCommandNames(t *testing.T) {
 func TestBuiltinCommandSuggestions(t *testing.T) {
 	assert.Contains(t, BuiltinCommandSuggestions(), CommandContext)
 	assert.Contains(t, BuiltinCommandSuggestions(), "ctx")
+	assert.Contains(t, BuiltinCommandSuggestions(), CommandWorkspace)
+	assert.Contains(t, BuiltinCommandSuggestions(), "workspaces")
 }
 
 func TestBuiltinUsageEntries(t *testing.T) {
@@ -82,6 +85,7 @@ func TestUsageTextGroupsByCategory(t *testing.T) {
 
 	// Aliases render parenthetically in the description.
 	assert.Contains(t, out, "(alias: ctx)")
+	assert.Contains(t, out, "(alias: workspaces)")
 	assert.Contains(t, out, "(alias: wt)")
 	assert.Contains(t, out, "(alias: list)")
 
@@ -96,5 +100,6 @@ func TestUsageTextGroupsByCategory(t *testing.T) {
 
 func TestResolveBuiltinCommandName(t *testing.T) {
 	assert.Equal(t, CommandContext, ResolveBuiltinCommandName("ctx"))
+	assert.Equal(t, CommandWorkspace, ResolveBuiltinCommandName("workspaces"))
 	assert.Equal(t, CommandLL, ResolveBuiltinCommandName(CommandLL))
 }

@@ -29,7 +29,7 @@ func discoverCodexSessions(pathIndex map[string]string, external bool) []AgentSe
 		return nil
 	}
 
-	query := `SELECT id, cwd, first_user_message, model, created_at, updated_at FROM threads ORDER BY updated_at DESC`
+	query := `SELECT id, cwd, first_user_message, model, created_at, updated_at, title FROM threads ORDER BY updated_at DESC`
 	cmd := exec.Command(sqlite3, "-separator", "\t", dbPath, query)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -45,8 +45,8 @@ func discoverCodexSessions(pathIndex map[string]string, external bool) []AgentSe
 			continue
 		}
 
-		fields := strings.SplitN(line, "\t", 6)
-		if len(fields) < 6 {
+		fields := strings.SplitN(line, "\t", 7)
+		if len(fields) < 7 {
 			continue
 		}
 
@@ -56,6 +56,7 @@ func discoverCodexSessions(pathIndex map[string]string, external bool) []AgentSe
 		model := fields[3]
 		createdAt := parseUnixSeconds(fields[4])
 		updatedAt := parseUnixSeconds(fields[5])
+		title := fields[6]
 
 		repo, matched := matchSessionRepo(cwd, pathIndex)
 		if external {
@@ -76,10 +77,26 @@ func discoverCodexSessions(pathIndex map[string]string, external bool) []AgentSe
 			LastActive: updatedAt,
 			Prompt:     prompt,
 			Model:      model,
+			Name:       codexThreadName(title, prompt),
 		})
 	}
 
 	return sessions
+}
+
+// codexThreadName returns the user-set thread name, or "" when the
+// thread is unnamed. Codex pre-populates the threads.title column with
+// the first user message, so we treat title as a name only when it
+// differs from first_user_message — that signals an explicit rename.
+func codexThreadName(title, firstUserMessage string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	if title == strings.TrimSpace(firstUserMessage) {
+		return ""
+	}
+	return title
 }
 
 func parseUnixSeconds(s string) time.Time {

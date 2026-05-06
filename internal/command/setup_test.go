@@ -1,7 +1,6 @@
 package command
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,7 +134,7 @@ repos:
 	assert.NotContains(t, out, "d, e, f")
 }
 
-func TestSyncScopeDir_SkipsUnclonedRepos(t *testing.T) {
+func TestSyncScopeHint_SkipsUnclonedRepos(t *testing.T) {
 	wsHome := t.TempDir()
 
 	clonedPath := filepath.Join(wsHome, "repos", "cloned")
@@ -147,16 +146,8 @@ func TestSyncScopeDir_SkipsUnclonedRepos(t *testing.T) {
 		{Name: "uncloned", Path: unclonedPath},
 	}
 
-	require.NoError(t, syncScopeDir(wsHome, ".scope", repos))
-
-	entries, err := os.ReadDir(filepath.Join(wsHome, ".scope"))
-	require.NoError(t, err)
-
-	var names []string
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	assert.Equal(t, []string{"cloned"}, names)
+	require.NoError(t, syncScopeHint(wsHome, "", "all", repos))
+	assertScopeEntries(t, wsHome, "cloned")
 }
 
 func TestWriteWorkspace_SkipsUnclonedRepos(t *testing.T) {
@@ -182,7 +173,7 @@ repos:
 		{Name: "uncloned", Path: unclonedPath},
 	}
 
-	require.NoError(t, writeWorkspace(m, wsHome, repos, false))
+	require.NoError(t, writeWorkspace(m, wsHome, "", repos, false))
 
 	assertWorkspaceFolders(t, filepath.Join(wsHome, m.Workspace), "~ workspace", "cloned")
 }

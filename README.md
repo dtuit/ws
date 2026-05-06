@@ -6,7 +6,8 @@ At a glance:
 
 - `manifest.yml` declares which repos exist, where they clone, and how they are grouped
 - `ws setup` clones missing repos into the configured `root`
-- `ws context` regenerates a VS Code workspace and configured scope symlink trees
+- `ws context` regenerates the active VS Code workspace and writes a scope hint under `.ws/`
+- `ws workspace use <name>` activates a named workspace preset for the current shell
 - `ws <command...>` fans shell commands out across the selected repos
 
 The recommended model is simple:
@@ -16,7 +17,7 @@ The recommended model is simple:
 - clone and operate on the managed repos from there
 - use filters and context to scope editor state, operations, and agent-visible paths
 
-`ws` reads `manifest.yml`, clones missing repos, fans commands out across repos, generates a VS Code workspace, and maintains configured scope symlink trees for filesystem-based agents. By default that is a single `.scope/` tree.
+`ws` reads `manifest.yml`, clones missing repos, fans commands out across repos, generates VS Code workspace files, and writes repo-scope hints for agents under `.ws/`. The default context writes `.ws/scope.yml`; named workspaces write `.ws/workspaces/<name>/scope.yml`.
 
 ## Install
 
@@ -75,7 +76,6 @@ code/
 │   ├── manifest.yml
 │   ├── manifest.local.yml      # optional, ignored
 │   ├── .ws/                    # generated state (context, agent pins), ignored
-│   ├── .scope/                 # generated symlinks, ignored (default)
 │   └── ws.code-workspace       # generated, ignored
 ├── api-server/
 ├── auth-service/
@@ -83,19 +83,16 @@ code/
 ```
 
 `root` is required in `manifest.yml`; there is no implicit default.
-The recommended layout is `root: ..`, which keeps the workspace repo separate from the managed repos while still letting `.scope/` act as the default agent-facing tree.
+The recommended layout is `root: ..`, which keeps the workspace repo separate from the managed repos while keeping the workspace repo itself as the control plane.
 If you prefer a self-contained tree, use `root: repos` instead.
 
 A typical `.gitignore` for the recommended sibling-checkout layout:
 
 ```gitignore
-.scope/
 .ws/
 *.code-workspace
 manifest.local.yml
 ```
-
-If you customize `scopes:`, add those generated directories too.
 
 If you use `root: repos`, add `repos/` too.
 
@@ -110,7 +107,6 @@ cd acme-workspace
 git init
 
 cat > .gitignore <<'EOF'
-.scope/
 .ws/
 *.code-workspace
 manifest.local.yml
@@ -158,9 +154,9 @@ remotes:
 
 branch: main
 workspace: ws.code-workspace
-scopes:
-  - dir: .scope
-    source: context
+workspaces:
+  backend: backend
+  frontend: web-app,admin-dashboard
 
 groups:
   backend: [api-server, auth-service, worker]
@@ -200,6 +196,7 @@ ws shell install
 ```
 
 With that loaded, `ws` completes built-in commands, filters, repo names, and falls back to your shell's command completion for fan-out commands like `ws backend git ...`.
+If `WS_WORKSPACE` is set, the shell hook also prefixes your prompt with `(ws:<name>)`, similar to conda. Set `WS_CHANGEPS1=0` to disable that.
 
 ## Common Tasks
 
@@ -209,15 +206,17 @@ With that loaded, `ws` completes built-in commands, filters, repo names, and fal
 | See repo status across the current scope | `ws ll` |
 | See all local branches in ll format | `ws ll --branches` |
 | Narrow the workspace to a group | `ws context backend` |
+| Switch this shell to a named workspace | `ws workspace use backend` |
 | Snapshot active work into the context | `ws context active` |
 | Add one more repo to the current scope | `ws context add web-app` |
 | Re-resolve the saved context | `ws context refresh` |
 | Run a command across a group | `ws backend git status` |
 | Open the generated VS Code workspace | `ws open` |
+| Open a named VS Code workspace | `ws open backend` |
 | Open a repo's remote URL in the browser | `ws browse api-server` |
 | Print the path to a repo or worktree | `ws cd api-server` |
 
-`ws open` only works after a workspace file exists, so run `ws context <filter>` first if you have not generated one yet.
+`ws open` uses the active shell workspace when `WS_WORKSPACE` is set. `ws open <name>` prepares and opens that named workspace directly.
 
 ## Daily Workflow
 
@@ -241,10 +240,11 @@ ws shell init             Emit shell integration and completion
 ws shell install          Write shell config for ws cd and completion
 ws fetch [filter]         Fetch all repos in scope
 ws pull [filter]          Pull repos in scope
+ws workspace [subcommand] Manage named workspace presets
 ws context [filter]
                           Set or show the default filter (none/reset clears)
 ws ctx [filter]           Alias for ws context
-ws open                   Open the generated VS Code workspace
+ws open [name]            Open the generated VS Code workspace
 ws browse <repo>          Open the repo's origin URL in the default browser
                           ("." = repo containing the current directory)
 ws context refresh
@@ -319,44 +319,30 @@ Use groups for named subsets. The default `all` filter includes every active rep
 
 `ws context <filter>` does three things:
 
-1. stores the raw filter plus resolved default scope in `.ws/context.yml`
-2. regenerates the VS Code workspace file for that filter
-3. rebuilds the configured scope symlink directories (default: `.scope/`)
+1. stores the raw filter plus resolved default scope in `.ws/context.yml` or `.ws/workspaces/<name>/context.yml`
+2. regenerates the matching VS Code workspace file
+3. writes a scope hint for agents in `.ws/scope.yml` or `.ws/workspaces/<name>/scope.yml`
 
 For `ws context all`, `ws context none`, and `ws context reset`, the generated scope only includes repos that are already cloned on disk.
 `ws context refresh` reruns that resolution against the saved raw filter, which is useful after local activity changes or when linked worktrees were added or removed.
 
-Configure scope directories with `scopes:` in `manifest.yml` or `manifest.local.yml`.
-The default is:
+Named workspaces are defined in `manifest.yml`:
 
 ```yaml
-scopes:
-  - dir: .scope
-    source: context
+workspaces:
+  backend: backend,active:14d
+  frontend: web-app,admin-dashboard
 ```
 
-Available `source` values:
-
-- `context`: the repos in the current `ws context`
-- `all`: all cloned repos on disk, independent of the current context
-
-Example:
-
-```yaml
-scopes:
-  - dir: .scope
-    source: context
-  - dir: .all-repos
-    source: all
-```
-
-Set `scopes: []` to disable generated scope directories entirely.
+Run `ws workspace use <name>` to activate one in the current shell. With `ws shell init` loaded, that command updates `WS_WORKSPACE` automatically so `ws ll`, `ws open`, and fan-out commands default to that workspace's saved context.
 
 That makes the workspace repo useful as an agent entry point:
 
 - run `ws context backend` before starting focused work
+- run `ws workspace use backend` when you want one shell or VS Code window pinned to a saved workspace preset
 - run `ws context active` when you want a quick scope based on active local work
 - run `ws open` when you want to open the current generated workspace in VS Code
+- run `ws open backend` when you want to open a named workspace from any shell
 - run `ws context add repo-x` when you want to widen that scope without replacing it
 - run `ws context add active:1d` when you want to union the current scope with very recent local activity
 - run `ws context remove repo-x` when you want to narrow the current scope without rebuilding it from scratch
@@ -364,7 +350,7 @@ That makes the workspace repo useful as an agent entry point:
 - run `ws context -` (or `ws context prev`) to swap back to the previous context, like `cd -`
 - run `ws context save focus` when you want to snapshot the current scope into `manifest.yml`
 - run `ws context save --local scratch` when the saved group should live only in `manifest.local.yml`
-- use the workspace repo as the control plane and `.scope/` or another configured scope dir as the narrowed filesystem view for agents
+- point agents at the workspace repo and let them read `.ws/scope.yml` (or `.ws/workspaces/<name>/scope.yml`) as the narrowed filesystem hint
 - keep the shared manifest committed while local context stays in ignored files
 
 Recommended operator and agent loop:
@@ -374,7 +360,7 @@ Recommended operator and agent loop:
    To narrow the current scope, use `ws context remove <filter>`.
    To re-resolve the saved filter after activity or worktree changes, use `ws context refresh`.
 2. Verify the scope with `ws ll` or `ws repos`.
-3. Start the agent from `.scope/` or another configured scope dir when you want filesystem visibility to match that context.
+3. Start the agent from the workspace repo and have it read `.ws/scope.yml` (or the named-workspace variant) when you want filesystem visibility to match that context.
 4. Return to the workspace root when you need to change scope or edit `manifest.yml`.
 
 Example:
@@ -385,8 +371,7 @@ ws context backend
 ws ll
 
 # agent shell
-cd .scope
-ls .scope
+yq '.repos[].path' .ws/scope.yml
 ```
 
 ## Manifest
@@ -465,11 +450,9 @@ Start from the full reference file at [manifest.reference.yml](manifest.referenc
 Use `manifest.local.yml` for personal changes you do not want to commit.
 
 ```yaml
-scopes:
-  - dir: .scope
-    source: context
-  - dir: .all-repos
-    source: all
+workspaces:
+  backend: backend,active:7d
+  frontend: web-app,admin-dashboard
 
 worktrees: true
 
@@ -492,7 +475,7 @@ Merge rules:
 - `repos`: union, local wins on name conflict
 - `exclude`: additive
 - `groups`: local replaces same-name groups, adds new ones
-- `root`, `workspace`, `scopes`, and `worktrees`: local overrides when set
+- `root`, `workspace`, `workspaces`, and `worktrees`: local overrides when set
 
 `ws context save <group>` writes the current context into `manifest.yml`.
 Use `ws context save --local <group>` when the saved group should live only in `manifest.local.yml`.
@@ -502,6 +485,8 @@ Use `ws context save --local <group>` when the saved group should live only in `
 | Variable | Description |
 |---|---|
 | `WS_HOME` | Optional workspace root override |
+| `WS_WORKSPACE` | Active named workspace for the current shell |
+| `WS_CHANGEPS1` | Set to `0` to disable the shell prompt workspace marker |
 | `WS_WORKERS` | Max parallel workers (default: CPU count) |
 | `NO_COLOR` | Disable colored output |
 

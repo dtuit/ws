@@ -143,6 +143,11 @@ type shellArgs struct {
 	Action string
 }
 
+type workspaceArgs struct {
+	Action string
+	Name   string
+}
+
 func parseShellArgs(args []string) (shellArgs, error) {
 	if len(args) != 1 {
 		return shellArgs{}, fmt.Errorf("usage: ws shell <init|install>")
@@ -230,6 +235,32 @@ func parseContextArgs(args []string) (contextArgs, error) {
 
 	parsed.Filter = strings.Join(tokens, ",")
 	return parsed, nil
+}
+
+func parseWorkspaceArgs(args []string) (workspaceArgs, error) {
+	if len(args) == 0 {
+		return workspaceArgs{Action: "show"}, nil
+	}
+
+	switch args[0] {
+	case "list", "ls":
+		if len(args) != 1 {
+			return workspaceArgs{}, fmt.Errorf("usage: ws workspace list")
+		}
+		return workspaceArgs{Action: "list"}, nil
+	case "use":
+		if len(args) != 2 {
+			return workspaceArgs{}, fmt.Errorf("usage: ws workspace use <name>")
+		}
+		return workspaceArgs{Action: "use", Name: strings.TrimSpace(args[1])}, nil
+	case "clear", "unset":
+		if len(args) != 1 {
+			return workspaceArgs{}, fmt.Errorf("usage: ws workspace clear")
+		}
+		return workspaceArgs{Action: "clear"}, nil
+	default:
+		return workspaceArgs{}, fmt.Errorf("usage: ws workspace [list|use <name>|clear]")
+	}
 }
 
 func parseEditorFlag(args []string) (string, []string) {

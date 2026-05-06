@@ -79,6 +79,26 @@ repos:
 	}, m.Scopes)
 }
 
+func TestParse_Workspaces(t *testing.T) {
+	m, err := Parse([]byte(`
+root: ..
+remotes:
+  origin: git@example.com:org
+workspaces:
+  backend: backend,active:14d
+  frontend: web-app,api-server
+repos:
+  web-app:
+  api-server:
+`))
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]string{
+		"backend":  "backend,active:14d",
+		"frontend": "web-app,api-server",
+	}, m.Workspaces)
+}
+
 func TestParse_RejectsInvalidScopeDir(t *testing.T) {
 	_, err := Parse([]byte(`
 root: ..
@@ -335,6 +355,33 @@ scopes: []
 	m, err := LoadWithLocal(dir)
 	require.NoError(t, err)
 	assert.Empty(t, m.Scopes)
+}
+
+func TestMergeLocal_WorkspacesMerge(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yml"), []byte(`
+root: ..
+remotes:
+  origin: git@example.com:org
+workspaces:
+  backend: repo-a
+repos:
+  repo-a:
+  repo-b:
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.local.yml"), []byte(`
+workspaces:
+  backend: repo-b
+  frontend: repo-a,repo-b
+`), 0644))
+
+	m, err := LoadWithLocal(dir)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]string{
+		"backend":  "repo-b",
+		"frontend": "repo-a,repo-b",
+	}, m.Workspaces)
 }
 
 func TestMergeLocal_NoLocalFile(t *testing.T) {
@@ -779,9 +826,9 @@ repos:
 
 func TestSplitDefaultCompare(t *testing.T) {
 	cases := []struct {
-		in           string
-		wantRemote   string
-		wantBranch   string
+		in         string
+		wantRemote string
+		wantBranch string
 	}{
 		{"", "", ""},
 		{"upstream", "upstream", ""},

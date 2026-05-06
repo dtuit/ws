@@ -4,21 +4,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/dtuit/ws/internal/git"
 	"github.com/dtuit/ws/internal/manifest"
+	"gopkg.in/yaml.v3"
 )
 
 // SetContext sets the default filter, regenerates the VS Code workspace,
-// and updates the configured scope symlink directories to match.
+// and updates the workspace scope hint file to match.
 func SetContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool) error {
-	return applyContext(m, wsHome, filter, includeWorktrees, applyModeSet)
+	return applyContext(m, wsHome, activeWorkspaceName(), filter, includeWorktrees, applyModeSet)
 }
 
-// RefreshContext re-resolves the stored context filter and rebuilds the scope.
+// RefreshContext re-resolves the stored context filter and rebuilds the scope hint.
 func RefreshContext(m *manifest.Manifest, wsHome string, includeWorktrees bool) error {
-	state, ok, err := loadStoredContextState(wsHome)
+	workspace := activeWorkspaceName()
+	state, ok, err := loadWorkspaceContextState(wsHome, workspace)
 	if err != nil {
 		return err
 	}
@@ -26,13 +29,14 @@ func RefreshContext(m *manifest.Manifest, wsHome string, includeWorktrees bool) 
 		return fmt.Errorf("no context set")
 	}
 
-	return applyContext(m, wsHome, state.Raw, includeWorktrees, applyModeRefresh)
+	return applyContext(m, wsHome, workspace, state.Raw, includeWorktrees, applyModeRefresh)
 }
 
 // SwapContext swaps the current context with the previously set one,
 // analogous to `cd -`. Returns an error if no previous context is recorded.
 func SwapContext(m *manifest.Manifest, wsHome string, includeWorktrees bool) error {
-	state, ok, err := loadStoredContextState(wsHome)
+	workspace := activeWorkspaceName()
+	state, ok, err := loadWorkspaceContextState(wsHome, workspace)
 	if err != nil {
 		return err
 	}
@@ -40,7 +44,7 @@ func SwapContext(m *manifest.Manifest, wsHome string, includeWorktrees bool) err
 		return fmt.Errorf("no previous context")
 	}
 
-	return applyContext(m, wsHome, *state.Previous, includeWorktrees, applyModeSwap)
+	return applyContext(m, wsHome, workspace, *state.Previous, includeWorktrees, applyModeSwap)
 }
 
 type applyMode int
@@ -51,13 +55,13 @@ const (
 	applyModeSwap
 )
 
-func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees bool, mode applyMode) error {
+func applyContext(m *manifest.Manifest, wsHome, workspace, filter string, includeWorktrees bool, mode applyMode) error {
 	filter, err := normalizeContextFilter(m, filter)
 	if err != nil {
 		return err
 	}
 
-	prevState, hasPrev, err := loadStoredContextState(wsHome)
+	prevState, hasPrev, err := loadWorkspaceContextState(wsHome, workspace)
 	if err != nil {
 		return err
 	}
@@ -83,7 +87,7 @@ func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees 
 		return err
 	}
 	if filter == "" || filter == "none" || filter == "reset" {
-		if err := persistContextState(wsHome, "", repos, previous); err != nil {
+		if err := persistContextState(wsHome, workspace, "", repos, previous); err != nil {
 			return err
 		}
 		switch mode {
@@ -96,17 +100,20 @@ func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees 
 		default:
 			fmt.Println("Context cleared.")
 		}
-		if err := syncScopeDirs(m, wsHome, repos, includeWorktrees); err != nil {
+		if err := clearLegacyScopeDirs(m, wsHome); err != nil {
 			return err
 		}
-		return writeWorkspace(m, wsHome, repos, includeWorktrees)
+		if err := syncScopeHint(wsHome, workspace, "", repos); err != nil {
+			return err
+		}
+		return writeWorkspace(m, wsHome, workspace, repos, includeWorktrees)
 	}
 
 	if len(repos) == 0 && filter != "all" {
 		return fmt.Errorf("filter %q matched no repos", filter)
 	}
 
-	if err := persistContextState(wsHome, filter, repos, previous); err != nil {
+	if err := persistContextState(wsHome, workspace, filter, repos, previous); err != nil {
 		return err
 	}
 	switch mode {
@@ -119,10 +126,13 @@ func applyContext(m *manifest.Manifest, wsHome, filter string, includeWorktrees 
 	}
 	fmt.Printf("Resolved: %s\n", formatResolvedContextRepos(repos))
 
-	if err := syncScopeDirs(m, wsHome, repos, includeWorktrees); err != nil {
+	if err := clearLegacyScopeDirs(m, wsHome); err != nil {
 		return err
 	}
-	return writeWorkspace(m, wsHome, repos, includeWorktrees)
+	if err := syncScopeHint(wsHome, workspace, filter, repos); err != nil {
+		return err
+	}
+	return writeWorkspace(m, wsHome, workspace, repos, includeWorktrees)
 }
 
 // AddContext extends the current context with more groups or repos.
@@ -248,6 +258,11 @@ func collapseResolvedContextNames(m *manifest.Manifest, names []string) []string
 
 // ShowContext displays the current context.
 func ShowContext(m *manifest.Manifest, wsHome string) {
+	workspace := activeWorkspaceName()
+	if workspace != "" {
+		fmt.Printf("Workspace: %s\n", workspace)
+	}
+
 	state, ok, err := loadStoredContextState(wsHome)
 	if err != nil || !ok {
 		fmt.Println("No context set (using all repos)")
@@ -286,102 +301,90 @@ func formatResolvedContextRepos(repos []manifest.RepoInfo) string {
 	return strings.Join(names, ", ")
 }
 
-// syncScopeDirs creates/updates the configured symlink directories with repo views.
-// This constrains what filesystem-based agents (CLI tools, Claude Code) can see.
-func syncScopeDirs(m *manifest.Manifest, wsHome string, contextRepos []manifest.RepoInfo, includeWorktrees bool) error {
-	configuredDirs := make(map[string]bool, len(m.Scopes))
-	var allRepos []manifest.RepoInfo
-	allLoaded := false
-
-	for _, cfg := range m.Scopes {
-		configuredDirs[cfg.Dir] = true
-
-		repos := contextRepos
-		if cfg.Source == manifest.ScopeSourceAll {
-			if !allLoaded {
-				var err error
-				allRepos, err = resolveContextRepos(m, wsHome, "all", includeWorktrees)
-				if err != nil {
-					return err
-				}
-				allLoaded = true
-			}
-			repos = allRepos
-		}
-
-		if err := syncScopeDir(wsHome, cfg.Dir, repos); err != nil {
-			return err
-		}
-	}
-
-	if !configuredDirs[manifest.DefaultScopeDir] {
-		if err := clearScopeDir(wsHome, manifest.DefaultScopeDir); err != nil {
-			return err
-		}
-	}
-
-	return nil
+type scopeHint struct {
+	Workspace string          `yaml:"workspace"`
+	Filter    string          `yaml:"filter"`
+	Repos     []scopeHintRepo `yaml:"repos"`
 }
 
-func syncScopeDir(wsHome, dir string, repos []manifest.RepoInfo) error {
-	absDir := filepath.Join(wsHome, dir)
+type scopeHintRepo struct {
+	Name string `yaml:"name"`
+	Path string `yaml:"path"`
+}
 
-	// Remove existing symlinks (but not non-symlink entries, for safety)
-	if entries, err := os.ReadDir(absDir); err == nil {
-		for _, e := range entries {
-			p := filepath.Join(absDir, e.Name())
-			if e.Type()&os.ModeSymlink != 0 {
-				os.Remove(p)
-			}
-		}
+func syncScopeHint(wsHome, workspace, filter string, repos []manifest.RepoInfo) error {
+	hint := scopeHint{
+		Workspace: workspaceLabel(workspace),
+		Filter:    filter,
+		Repos:     make([]scopeHintRepo, 0, len(repos)),
 	}
 
-	if err := os.MkdirAll(absDir, 0755); err != nil {
-		return fmt.Errorf("creating scope dir %s: %w", dir, err)
-	}
-
-	// Create symlinks only for cloned repos — avoids dangling symlinks when
-	// a context is set before the repos have been cloned.
-	created := 0
 	for _, repo := range repos {
 		if !git.IsCheckout(repo.Path) {
 			continue
 		}
-		target := repo.Path
-		link := filepath.Join(absDir, repo.Name)
+		hint.Repos = append(hint.Repos, scopeHintRepo{
+			Name: repo.Name,
+			Path: relWorkspacePath(wsHome, repo.Path),
+		})
+	}
+	sort.Slice(hint.Repos, func(i, j int) bool {
+		return hint.Repos[i].Name < hint.Repos[j].Name
+	})
 
-		// Use relative path for the symlink
-		relTarget, err := filepath.Rel(absDir, target)
-		if err != nil {
-			relTarget = target
-		}
-
-		if err := os.Symlink(relTarget, link); err != nil && !os.IsExist(err) {
-			fmt.Fprintf(os.Stderr, "Warning: could not symlink %s: %v\n", repo.Name, err)
-			continue
-		}
-		created++
+	data, err := yaml.Marshal(&hint)
+	if err != nil {
+		return err
 	}
 
-	fmt.Printf("%s/ updated (%d symlinks)\n", filepath.ToSlash(dir), created)
+	path, err := stateWritePath(wsHome, workspaceScopeHintStateFile(workspace), "")
+	if err != nil {
+		return err
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+
+	fmt.Printf("Wrote %s (%d repos)\n", filepath.ToSlash(filepath.Join(wsStateDir, workspaceScopeHintStateFile(workspace))), len(hint.Repos))
 	return nil
 }
 
-func clearScopeDir(wsHome, dir string) error {
+func clearLegacyScopeDirs(m *manifest.Manifest, wsHome string) error {
+	dirs := map[string]bool{
+		manifest.DefaultScopeDir: true,
+	}
+	for _, cfg := range m.Scopes {
+		dirs[cfg.Dir] = true
+	}
+
+	for dir := range dirs {
+		if err := clearLegacyScopeDir(wsHome, dir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clearLegacyScopeDir(wsHome, dir string) error {
 	absDir := filepath.Join(wsHome, dir)
 	entries, err := os.ReadDir(absDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return fmt.Errorf("reading scope dir %s: %w", dir, err)
+		return fmt.Errorf("reading legacy scope dir %s: %w", dir, err)
 	}
 
 	for _, e := range entries {
 		p := filepath.Join(absDir, e.Name())
 		if e.Type()&os.ModeSymlink != 0 {
 			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("clearing scope dir %s: %w", dir, err)
+				return fmt.Errorf("clearing legacy scope dir %s: %w", dir, err)
 			}
 		}
 	}
@@ -389,11 +392,13 @@ func clearScopeDir(wsHome, dir string) error {
 	return nil
 }
 
-func persistContextState(wsHome, raw string, repos []manifest.RepoInfo, previous *string) error {
-	if err := saveStoredContextState(wsHome, raw, repos, previous); err != nil {
+func persistContextState(wsHome, workspace, raw string, repos []manifest.RepoInfo, previous *string) error {
+	if err := saveWorkspaceContextState(wsHome, workspace, raw, repos, previous); err != nil {
 		return err
 	}
-	removeLegacyResolvedContext(wsHome)
+	if workspace == "" {
+		removeLegacyResolvedContext(wsHome)
+	}
 	return nil
 }
 
