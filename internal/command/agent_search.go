@@ -268,13 +268,18 @@ func printSearchResults(sessions []AgentSession, matches []searchMatch) {
 		bySession[s.SessionID] = s
 	}
 
+	indexBySession := make(map[string]int, len(sessions))
+	for i, s := range sessions {
+		indexBySession[s.SessionID] = i + 1
+	}
+
 	rows := make([]matchedRow, 0, len(matches))
 	for _, m := range matches {
 		s, ok := lookupSessionForMatch(bySession, m.ID)
 		if !ok {
 			continue
 		}
-		rows = append(rows, matchedRow{Session: s, Reason: m.Reason})
+		rows = append(rows, matchedRow{Session: s, Reason: m.Reason, Index: indexBySession[s.SessionID]})
 	}
 
 	if len(rows) == 0 {
@@ -283,12 +288,13 @@ func printSearchResults(sessions []AgentSession, matches []searchMatch) {
 	}
 
 	renderSearchTable(rows)
-	fmt.Printf("\n%s\n", term.Colorize(term.Dim, "Resume: ws agent resume <id-prefix>"))
+	fmt.Printf("\n%s\n", term.Colorize(term.Dim, "Resume: ws agent resume <#|id-prefix>"))
 }
 
 type matchedRow struct {
 	Session AgentSession
 	Reason  string
+	Index   int // 1-based position in the discovered-sessions list (matches `agent resume <#>`)
 }
 
 // lookupSessionForMatch matches by full ID first, then falls back to a unique
@@ -330,7 +336,13 @@ func renderSearchTable(rows []matchedRow) {
 		maxRepo = 24
 	}
 
-	idxWidth := len(fmt.Sprintf("%d", len(rows)))
+	maxIdx := len(rows)
+	for _, r := range rows {
+		if r.Index > maxIdx {
+			maxIdx = r.Index
+		}
+	}
+	idxWidth := len(fmt.Sprintf("%d", maxIdx))
 	if idxWidth < 2 {
 		idxWidth = 2
 	}
@@ -341,7 +353,7 @@ func renderSearchTable(rows []matchedRow) {
 		idxWidth, "#", "AGENT", maxRepo, "REPO", "WHEN", idCol, "ID", "REASON")
 	fmt.Println(strings.Repeat("-", 60+maxRepo))
 
-	for i, r := range rows {
+	for _, r := range rows {
 		when := formatTimeAgo(now, r.Session.LastActive)
 		shortID := shortSessionID(r.Session.SessionID)
 		if len(shortID) > idCol {
@@ -358,7 +370,7 @@ func renderSearchTable(rows []matchedRow) {
 		}
 
 		fmt.Printf("%*d  %s %-*s  %-12s %-*s  %s\n",
-			idxWidth, i+1,
+			idxWidth, r.Index,
 			term.Colorize(agentTypeColor(r.Session.Agent), fmt.Sprintf("%-8s", r.Session.Agent)),
 			maxRepo, truncateText(r.Session.Repo, maxRepo),
 			term.Colorize(term.Dim, when),
