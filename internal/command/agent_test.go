@@ -232,6 +232,27 @@ func TestParseRenameArgs(t *testing.T) {
 	}
 }
 
+func TestClaudeProjectDirName(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"/home/u/repo", "-home-u-repo"},
+		// Underscores in the path collapse to hyphens — this is what was
+		// breaking discovery for repos like sdm_smartocr_db.
+		{"/home/u/sdm_smartocr_db", "-home-u-sdm-smartocr-db"},
+		// Dots collapse too; a leading dot becomes a leading hyphen, which
+		// is why .worktrees ends up rendered as `--worktrees`.
+		{"/home/u/repo/.worktrees/x", "-home-u-repo--worktrees-x"},
+		// Hyphens and digits pass through unchanged.
+		{"/home/u/oss-multica-1", "-home-u-oss-multica-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, claudeProjectDirName(tc.in))
+		})
+	}
+}
+
 func TestReadClaudeNameFromTranscript(t *testing.T) {
 	claudeDir := t.TempDir()
 	projectPath := "/home/u/repo"

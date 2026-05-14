@@ -201,10 +201,32 @@ type claudeSessionFileMeta struct {
 	bypassPermissions bool
 }
 
+// claudeProjectDirName encodes a filesystem path the way Claude Code does
+// when naming subdirectories under ~/.claude/projects/. Every character that
+// is not [A-Za-z0-9-] is replaced with a hyphen — so `/`, `_`, `.`, and any
+// other separator collapse to `-`. e.g.
+//   /home/u/sdm_smartocr_db   -> -home-u-sdm-smartocr-db
+//   /home/u/repo/.worktrees/x -> -home-u-repo--worktrees-x
+func claudeProjectDirName(projectPath string) string {
+	var b strings.Builder
+	b.Grow(len(projectPath))
+	for _, r := range projectPath {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
+}
+
 // readClaudeSessionMeta checks that a conversation JSONL file exists and
 // reads session-level metadata from its first line (the permission-mode record).
 func readClaudeSessionMeta(claudeDir, projectPath, sessionID string) (claudeSessionFileMeta, bool) {
-	dirName := strings.ReplaceAll(projectPath, string(filepath.Separator), "-")
+	dirName := claudeProjectDirName(projectPath)
 	jsonlPath := filepath.Join(claudeDir, "projects", dirName, sessionID+".jsonl")
 
 	f, err := os.Open(jsonlPath)
@@ -251,7 +273,7 @@ func readClaudeSessionMeta(claudeDir, projectPath, sessionID string) (claudeSess
 // (e.g. /rename with empty args), which the caller should treat as
 // authoritative.
 func readClaudeNameFromTranscript(claudeDir, projectPath, sessionID string) (string, bool) {
-	dirName := strings.ReplaceAll(projectPath, string(filepath.Separator), "-")
+	dirName := claudeProjectDirName(projectPath)
 	jsonlPath := filepath.Join(claudeDir, "projects", dirName, sessionID+".jsonl")
 
 	f, err := os.Open(jsonlPath)
@@ -316,7 +338,7 @@ func parseRenameArgs(content string) (string, bool) {
 // enrichClaudeSessionDetail reads the conversation JSONL file to extract
 // the away_summary (recap) and last-prompt records for verbose display.
 func enrichClaudeSessionDetail(s *AgentSession, claudeDir string) {
-	dirName := strings.ReplaceAll(s.Dir, string(filepath.Separator), "-")
+	dirName := claudeProjectDirName(s.Dir)
 	jsonlPath := filepath.Join(claudeDir, "projects", dirName, s.SessionID+".jsonl")
 
 	f, err := os.Open(jsonlPath)
