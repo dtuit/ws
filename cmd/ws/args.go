@@ -143,6 +143,11 @@ type shellArgs struct {
 	Action string
 }
 
+type workspaceArgs struct {
+	Action string
+	Name   string
+}
+
 func parseShellArgs(args []string) (shellArgs, error) {
 	if len(args) != 1 {
 		return shellArgs{}, fmt.Errorf("usage: ws shell <init|install>")
@@ -232,6 +237,32 @@ func parseContextArgs(args []string) (contextArgs, error) {
 	return parsed, nil
 }
 
+func parseWorkspaceArgs(args []string) (workspaceArgs, error) {
+	if len(args) == 0 {
+		return workspaceArgs{Action: "show"}, nil
+	}
+
+	switch args[0] {
+	case "list", "ls":
+		if len(args) != 1 {
+			return workspaceArgs{}, fmt.Errorf("usage: ws workspace list")
+		}
+		return workspaceArgs{Action: "list"}, nil
+	case "use":
+		if len(args) != 2 {
+			return workspaceArgs{}, fmt.Errorf("usage: ws workspace use <name>")
+		}
+		return workspaceArgs{Action: "use", Name: strings.TrimSpace(args[1])}, nil
+	case "clear", "unset":
+		if len(args) != 1 {
+			return workspaceArgs{}, fmt.Errorf("usage: ws workspace clear")
+		}
+		return workspaceArgs{Action: "clear"}, nil
+	default:
+		return workspaceArgs{}, fmt.Errorf("usage: ws workspace [list|use <name>|clear]")
+	}
+}
+
 func parseEditorFlag(args []string) (string, []string) {
 	var editor string
 	var rest []string
@@ -247,16 +278,18 @@ func parseEditorFlag(args []string) (string, []string) {
 }
 
 type agentArgs struct {
-	Action      string   // "start", "ls", "resume"
+	Action      string   // "start", "ls", "resume", "search"
 	Repo        string   // target repo (for start)
 	Agent       string   // agent profile name (--agent)
-	IndexOrID   string   // for resume: numeric index or session ID prefix
+	IndexOrID   string   // for resume: numeric index, session name (prefix), or session ID prefix
 	Filter      string   // for ls: filter expression
 	Limit       int      // for ls: max sessions (0 = default)
 	ShowAll     bool     // for ls: show all sessions
-	Verbose     bool     // for ls: show full prompt text
+	Verbose     bool     // for ls/search: include richer per-session text
 	ShowLast    bool     // for ls: compact view shows last user prompt
 	ShowRecap   bool     // for ls: compact view shows recap (fallback last/first)
+	Query       string   // for search: natural-language query
+	External    bool     // for search: include sessions outside the workspace
 	Passthrough []string // args after -- to pass to the agent CLI
 }
 
@@ -281,9 +314,11 @@ func parseAgentArgs(args []string) (agentArgs, error) {
 	switch wsArgs[0] {
 	case "ls", "list":
 		return parseAgentLSArgs(wsArgs[1:])
+	case "search":
+		return parseAgentSearchArgs(wsArgs[1:])
 	case "resume":
 		if len(wsArgs) != 2 {
-			return agentArgs{}, fmt.Errorf("usage: ws agent resume <#|session-id>")
+			return agentArgs{}, fmt.Errorf("usage: ws agent resume <#|name|session-id>")
 		}
 		return agentArgs{Action: "resume", IndexOrID: wsArgs[1]}, nil
 	case "pin", "unpin":
@@ -358,6 +393,39 @@ func parseAgentLSArgs(args []string) (agentArgs, error) {
 	if parsed.ShowLast && parsed.ShowRecap {
 		return agentArgs{}, fmt.Errorf("--last and --recap are mutually exclusive")
 	}
+	return parsed, nil
+}
+
+func parseAgentSearchArgs(args []string) (agentArgs, error) {
+	parsed := agentArgs{Action: "search"}
+	var queryParts []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--external":
+			parsed.External = true
+		case "-v", "--verbose":
+			parsed.Verbose = true
+		case "-n":
+			if i+1 >= len(args) {
+				return agentArgs{}, fmt.Errorf("-n requires a number")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 1 {
+				return agentArgs{}, fmt.Errorf("-n requires a positive number")
+			}
+			parsed.Limit = n
+			i++
+		default:
+			if strings.HasPrefix(args[i], "-") && args[i] != "-" {
+				return agentArgs{}, fmt.Errorf("unknown flag: %s", args[i])
+			}
+			queryParts = append(queryParts, args[i])
+		}
+	}
+	if len(queryParts) == 0 {
+		return agentArgs{}, fmt.Errorf("usage: ws agent search [--external] [-v] [-n N] <query>")
+	}
+	parsed.Query = strings.Join(queryParts, " ")
 	return parsed, nil
 }
 

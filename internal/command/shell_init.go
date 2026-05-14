@@ -16,6 +16,54 @@ func ShellInitScript() string {
   done
   return 1
 }
+_ws_prompt_prefix() {
+  if [ -n "${WS_WORKSPACE:-}" ]; then
+    printf '(ws:%%s) ' "$WS_WORKSPACE"
+  fi
+}
+_ws_update_bash_prompt() {
+  if [ "${WS_CHANGEPS1:-1}" = "0" ]; then
+    if [ -n "${_WS_PROMPT_PREFIX:-}" ]; then
+      PS1="${PS1#"$_WS_PROMPT_PREFIX"}"
+      _WS_PROMPT_PREFIX=""
+    fi
+    return
+  fi
+  local prefix
+  prefix="$(_ws_prompt_prefix)"
+  if [ -n "${_WS_PROMPT_PREFIX:-}" ]; then
+    PS1="${PS1#"$_WS_PROMPT_PREFIX"}"
+  fi
+  _WS_PROMPT_PREFIX="$prefix"
+  if [ -n "$prefix" ]; then
+    PS1="${prefix}${PS1}"
+  fi
+}
+_ws_update_zsh_prompt() {
+  if [ "${WS_CHANGEPS1:-1}" = "0" ]; then
+    if [ -n "${_WS_PROMPT_PREFIX:-}" ]; then
+      PROMPT="${PROMPT#$_WS_PROMPT_PREFIX}"
+      _WS_PROMPT_PREFIX=""
+    fi
+    return
+  fi
+  local prefix
+  prefix="$(_ws_prompt_prefix)"
+  if [ -n "${_WS_PROMPT_PREFIX:-}" ]; then
+    PROMPT="${PROMPT#$_WS_PROMPT_PREFIX}"
+  fi
+  _WS_PROMPT_PREFIX="$prefix"
+  if [ -n "$prefix" ]; then
+    PROMPT="${prefix}${PROMPT}"
+  fi
+}
+_ws_refresh_prompt() {
+  if [ -n "${BASH_VERSION:-}" ]; then
+    _ws_update_bash_prompt
+  elif [ -n "${ZSH_VERSION:-}" ]; then
+    _ws_update_zsh_prompt
+  fi
+}
 ws() {
   case "$1" in
     cd)
@@ -33,7 +81,7 @@ ws() {
         return
       fi
       case "$2" in
-        ls|list|pin|unpin)
+        ls|list|search|pin|unpin)
           command ws "$@"
           ;;
         *)
@@ -42,6 +90,25 @@ ws() {
           _ws_agent_dir="$(printf '%%s\n' "$_ws_agent_info" | head -1)"
           _ws_agent_cmd="$(printf '%%s\n' "$_ws_agent_info" | tail -n +2)"
           cd "$_ws_agent_dir" && eval "$_ws_agent_cmd"
+          ;;
+      esac
+      ;;
+    workspace)
+      if _ws_wants_help "${@:2}"; then
+        command ws "$@"
+        return
+      fi
+      case "$2" in
+        use)
+          local _ws_workspace_name
+          _ws_workspace_name="$3"
+          command ws "$@" && export WS_WORKSPACE="$_ws_workspace_name" && _ws_refresh_prompt
+          ;;
+        clear|unset)
+          command ws "$@" && unset WS_WORKSPACE && _ws_refresh_prompt
+          ;;
+        *)
+          command ws "$@"
           ;;
       esac
       ;;
@@ -102,7 +169,7 @@ _ws_delegate_bash() {
 }
 
 _ws_complete_bash() {
-  local cur prev delegate_start
+  local cur prev delegate_start line value
   local -a completions
   COMPREPLY=()
   completions=()
@@ -127,7 +194,13 @@ _ws_complete_bash() {
     COMPREPLY=( $(compgen -c -- "$cur" | sort -u) )
     return 0
   fi
-  COMPREPLY=( "${completions[@]}" )
+  # Each completion line is "<group>\t<value>\t<desc>"; bash only renders
+  # values, so strip to the second field.
+  for line in "${completions[@]}"; do
+    value="${line#*$'\t'}"
+    value="${value%%%%$'\t'*}"
+    COMPREPLY+=( "$value" )
+  done
 }
 
 _ws_delegate_zsh() {
@@ -171,18 +244,98 @@ _ws_complete_zsh() {
     _command_names
     return
   fi
-  if (( ${#completions[@]} > 0 )); then
-    compadd -- "${completions[@]}"
+  if (( ${#completions[@]} == 0 )); then
+    return
   fi
+
+  # Each completion line is "<group>\t<value>\t<desc>". Discover groups in
+  # order of first appearance, then build a value-description array per group
+  # and hand it to _describe so zsh renders headings with the description
+  # column. Colons in values (e.g. "active:1d") are escaped because _describe
+  # treats ":" as the name/description separator.
+  local -a _ws_order
+  local -A _ws_seen
+  local line g rest v d
+  for line in "${completions[@]}"; do
+    g="${line%%%%$'\t'*}"
+    if [[ -z "${_ws_seen[$g]}" ]]; then
+      _ws_seen[$g]=1
+      _ws_order+=("$g")
+    fi
+  done
+
+  for g in "${_ws_order[@]}"; do
+    local -a _ws_pairs
+    _ws_pairs=()
+    for line in "${completions[@]}"; do
+      [[ "${line%%%%$'\t'*}" == "$g" ]] || continue
+      rest="${line#*$'\t'}"
+      v="${rest%%%%$'\t'*}"
+      d="${rest#*$'\t'}"
+      [[ "$d" == "$rest" ]] && d=""
+      v="${v//:/\\:}"
+      if [[ -n "$d" ]]; then
+        _ws_pairs+=("$v:$d")
+      else
+        _ws_pairs+=("$v")
+      fi
+    done
+
+    if [[ -z "$g" ]]; then
+      compadd -- "${_ws_pairs[@]}"
+    else
+      _describe -t "$g" "$g" _ws_pairs
+    fi
+  done
 }
 
 if [ -n "${BASH_VERSION:-}" ]; then
+  _ws_add_bash_prompt_command() {
+    local cmd existing
+    cmd="_ws_update_bash_prompt"
+    case "$(declare -p PROMPT_COMMAND 2>/dev/null)" in
+      "declare -a "*)
+        for existing in "${PROMPT_COMMAND[@]}"; do
+          if [ "$existing" = "$cmd" ]; then
+            return
+          fi
+        done
+        PROMPT_COMMAND+=("$cmd")
+        ;;
+      *)
+        case ";${PROMPT_COMMAND:-};" in
+          *";$cmd;"*) ;;
+          ";;") PROMPT_COMMAND="$cmd" ;;
+          *) PROMPT_COMMAND="${PROMPT_COMMAND};$cmd" ;;
+        esac
+        ;;
+    esac
+  }
+  _ws_add_bash_prompt_command
+  _ws_update_bash_prompt
   complete -F _ws_complete_bash ws
 elif [ -n "${ZSH_VERSION:-}" ]; then
+  _ws_add_zsh_precmd() {
+    typeset -ga precmd_functions
+    local fn
+    for fn in "${precmd_functions[@]}"; do
+      if [[ "$fn" == "_ws_update_zsh_prompt" ]]; then
+        return
+      fi
+    done
+    precmd_functions+=(_ws_update_zsh_prompt)
+  }
+  _ws_add_zsh_precmd
+  _ws_update_zsh_prompt
   if ! whence compdef >/dev/null 2>&1; then
     autoload -Uz compinit
     compinit
   fi
+  # Scope-limited zstyles so ws shows group headings + descriptions without
+  # touching the user's other completions. group-name '' tells zsh to use
+  # each tag (the labels passed to _describe) as the section heading.
+  zstyle ':completion:*:*:ws:*' group-name ''
+  zstyle ':completion:*:*:ws:*:descriptions' format '%%B%%d%%b'
   compdef _ws_complete_zsh ws
 fi
 `, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel, CompletionCommandFallbackSentinel)

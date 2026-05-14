@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,6 +169,130 @@ func TestEnrichClaudeSessionMetadata_IgnoresBadFiles(t *testing.T) {
 	assert.Equal(t, "keep", sessions[0].Name)
 }
 
+func TestCodexThreadName(t *testing.T) {
+	cases := []struct {
+		name             string
+		title            string
+		firstUserMessage string
+		want             string
+	}{
+		{name: "renamed", title: "fix-bifrost", firstUserMessage: "Use a subagent to do X", want: "fix-bifrost"},
+		{name: "title equals prompt", title: "do X", firstUserMessage: "do X", want: ""},
+		{name: "title with surrounding whitespace equals prompt", title: "  do X  ", firstUserMessage: "do X", want: ""},
+		{name: "empty title", title: "", firstUserMessage: "anything", want: ""},
+		{name: "whitespace-only title", title: "   ", firstUserMessage: "anything", want: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, codexThreadName(tc.title, tc.firstUserMessage))
+		})
+	}
+}
+
+func TestParseRenameArgs(t *testing.T) {
+	cases := []struct {
+		name      string
+		content   string
+		want      string
+		wantFound bool
+	}{
+		{
+			name:      "input event with name",
+			content:   "<command-name>/rename</command-name>\n<command-message>rename</command-message>\n<command-args>fix-thing</command-args>",
+			want:      "fix-thing",
+			wantFound: true,
+		},
+		{
+			name:      "input event with empty args (clear)",
+			content:   "<command-name>/rename</command-name>\n<command-args></command-args>",
+			want:      "",
+			wantFound: true,
+		},
+		{
+			name:      "stdout event has no command-args",
+			content:   "<local-command-stdout>Session renamed to: foo</local-command-stdout>",
+			want:      "",
+			wantFound: false,
+		},
+		{
+			name:      "different command",
+			content:   "<command-name>/status</command-name>\n<command-args>x</command-args>",
+			want:      "",
+			wantFound: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseRenameArgs(tc.content)
+			assert.Equal(t, tc.wantFound, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestClaudeProjectDirName(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"/home/u/repo", "-home-u-repo"},
+		// Underscores in the path collapse to hyphens — this is what was
+		// breaking discovery for repos like sdm_smartocr_db.
+		{"/home/u/sdm_smartocr_db", "-home-u-sdm-smartocr-db"},
+		// Dots collapse too; a leading dot becomes a leading hyphen, which
+		// is why .worktrees ends up rendered as `--worktrees`.
+		{"/home/u/repo/.worktrees/x", "-home-u-repo--worktrees-x"},
+		// Hyphens and digits pass through unchanged.
+		{"/home/u/oss-multica-1", "-home-u-oss-multica-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, claudeProjectDirName(tc.in))
+		})
+	}
+}
+
+func TestReadClaudeNameFromTranscript(t *testing.T) {
+	claudeDir := t.TempDir()
+	projectPath := "/home/u/repo"
+	sessionID := "sess-1"
+	dirName := "-home-u-repo"
+	transcriptDir := filepath.Join(claudeDir, "projects", dirName)
+	require.NoError(t, os.MkdirAll(transcriptDir, 0o755))
+
+	// Two /rename events: the second (latest) wins.
+	lines := []string{
+		`{"type":"user","message":"hello","sessionId":"sess-1"}`,
+		`{"type":"system","subtype":"local_command","content":"<command-name>/rename</command-name>\n<command-args>first-name</command-args>"}`,
+		`{"type":"system","subtype":"local_command","content":"<local-command-stdout>Session renamed to: first-name</local-command-stdout>"}`,
+		`{"type":"system","subtype":"local_command","content":"<command-name>/rename</command-name>\n<command-args>final-name</command-args>"}`,
+	}
+	jsonlPath := filepath.Join(transcriptDir, sessionID+".jsonl")
+	require.NoError(t, os.WriteFile(jsonlPath, []byte(strings.Join(lines, "\n")), 0o644))
+
+	name, ok := readClaudeNameFromTranscript(claudeDir, projectPath, sessionID)
+	assert.True(t, ok)
+	assert.Equal(t, "final-name", name)
+
+	// Missing file: returns ("", false)
+	name, ok = readClaudeNameFromTranscript(claudeDir, projectPath, "missing")
+	assert.False(t, ok)
+	assert.Equal(t, "", name)
+
+	// Latest /rename clears the name.
+	clearedID := "sess-2"
+	clearedLines := []string{
+		`{"type":"system","subtype":"local_command","content":"<command-name>/rename</command-name>\n<command-args>old-name</command-args>"}`,
+		`{"type":"system","subtype":"local_command","content":"<command-name>/rename</command-name>\n<command-args></command-args>"}`,
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(transcriptDir, clearedID+".jsonl"),
+		[]byte(strings.Join(clearedLines, "\n")), 0o644))
+	name, ok = readClaudeNameFromTranscript(claudeDir, projectPath, clearedID)
+	assert.True(t, ok, "explicit clear should still report found")
+	assert.Equal(t, "", name)
+}
+
 func TestSelectCompactText(t *testing.T) {
 	full := AgentSession{Prompt: "first", LastPrompt: "last", Summary: "recap"}
 	onlyFirst := AgentSession{Prompt: "first"}
@@ -245,6 +370,74 @@ func TestResolveSessionRef_NoMatch(t *testing.T) {
 
 	_, err := resolveSessionRef(sessions, "xyz")
 	assert.Error(t, err)
+}
+
+func TestResolveSessionRef_ByName(t *testing.T) {
+	sessions := []AgentSession{
+		{SessionID: "aaa111", Name: "Dragonfly"},
+		{SessionID: "bbb222", Name: "search-fix"},
+		{SessionID: "ccc333"},
+	}
+
+	// Exact, case-insensitive match.
+	s, err := resolveSessionRef(sessions, "dragonfly")
+	require.NoError(t, err)
+	assert.Equal(t, "aaa111", s.SessionID)
+
+	// Prefix match.
+	s, err = resolveSessionRef(sessions, "search")
+	require.NoError(t, err)
+	assert.Equal(t, "bbb222", s.SessionID)
+}
+
+func TestResolveSessionRef_NameBeatsIDPrefix(t *testing.T) {
+	// "ccc" is both a name and the prefix of another session's ID — the
+	// name match should win so users typing a name aren't shadowed by a
+	// coincidental hex prefix.
+	sessions := []AgentSession{
+		{SessionID: "ccc111"},
+		{SessionID: "ddd222", Name: "ccc"},
+	}
+
+	s, err := resolveSessionRef(sessions, "ccc")
+	require.NoError(t, err)
+	assert.Equal(t, "ddd222", s.SessionID)
+}
+
+func TestResolveSessionRef_ExactNameBeatsPrefix(t *testing.T) {
+	// "foo" is an exact name for one session and a prefix for another —
+	// the exact match wins instead of erroring as ambiguous.
+	sessions := []AgentSession{
+		{SessionID: "aaa", Name: "foo"},
+		{SessionID: "bbb", Name: "foobar"},
+	}
+
+	s, err := resolveSessionRef(sessions, "foo")
+	require.NoError(t, err)
+	assert.Equal(t, "aaa", s.SessionID)
+}
+
+func TestResolveSessionRef_AmbiguousName(t *testing.T) {
+	sessions := []AgentSession{
+		{SessionID: "aaa", Name: "demo"},
+		{SessionID: "bbb", Name: "demo"},
+	}
+
+	_, err := resolveSessionRef(sessions, "demo")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous")
+}
+
+func TestResolveSessionRef_NameMissFallsBackToIDPrefix(t *testing.T) {
+	sessions := []AgentSession{
+		{SessionID: "abc123", Name: "rocket"},
+		{SessionID: "xyz789", Name: "balloon"},
+	}
+
+	// "abc" doesn't match any name; the ID prefix path should still work.
+	s, err := resolveSessionRef(sessions, "abc")
+	require.NoError(t, err)
+	assert.Equal(t, "abc123", s.SessionID)
 }
 
 func TestResolveAgentCmd_FromManifest(t *testing.T) {
@@ -371,7 +564,15 @@ repos:
 	require.NoError(t, err)
 
 	index := buildPathIndex(m, "/tmp/ws", agentFilterRoot, false)
-	assert.Equal(t, map[string]string{"/tmp/ws": "(root)"}, index)
+	assert.Equal(t, map[string]string{"/tmp/ws": "ws"}, index)
+}
+
+func TestWorkspaceRootRepoName(t *testing.T) {
+	assert.Equal(t, "ws", workspaceRootRepoName("/tmp/ws"))
+	assert.Equal(t, "xtracta-workspace", workspaceRootRepoName("/home/u/code/xtracta-workspace"))
+	assert.Equal(t, "workspace", workspaceRootRepoName(""))
+	assert.Equal(t, "workspace", workspaceRootRepoName("/"))
+	assert.Equal(t, "workspace", workspaceRootRepoName("."))
 }
 
 func TestReconcileClaudePermissionFlag(t *testing.T) {

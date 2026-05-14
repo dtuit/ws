@@ -1,25 +1,26 @@
 package command
 
 const (
-	CommandHelp    = "help"
-	CommandVersion = "version"
-	CommandLL      = "ll"
-	CommandCD      = "cd"
-	CommandSetup   = "setup"
-	CommandShell   = "shell"
-	CommandOpen    = "open"
-	CommandBrowse  = "browse"
-	CommandRepos   = "repos"
-	CommandFetch   = "fetch"
-	CommandPull    = "pull"
-	CommandAgent   = "agent"
-	CommandContext  = "context"
-	CommandDirs    = "dirs"
-	CommandMux      = "mux"
-	CommandWorktree = "worktree"
-	CommandRemotes  = "remotes"
+	CommandHelp           = "help"
+	CommandVersion        = "version"
+	CommandLL             = "ll"
+	CommandCD             = "cd"
+	CommandSetup          = "setup"
+	CommandShell          = "shell"
+	CommandOpen           = "open"
+	CommandBrowse         = "browse"
+	CommandRepos          = "repos"
+	CommandFetch          = "fetch"
+	CommandPull           = "pull"
+	CommandAgent          = "agent"
+	CommandContext        = "context"
+	CommandWorkspace      = "workspace"
+	CommandDirs           = "dirs"
+	CommandMux            = "mux"
+	CommandWorktree       = "worktree"
+	CommandRemotes        = "remotes"
 	CommandRepairRefspecs = "repair-refspecs"
-	CommandUpgrade  = "upgrade"
+	CommandUpgrade        = "upgrade"
 )
 
 // Category groups related commands under one heading in `ws help`.
@@ -213,17 +214,47 @@ date, the install command users already use to upgrade.
 --check is currently the only mode and the default; --apply will be
 added in a future release.
 `,
-		complete: completeNoopCommand,
+		complete: completeUpgradeCommand,
 	},
 	{
 		Name:        CommandOpen,
 		Category:    CategoryTools,
 		ShowInUsage: true,
-		Summary:     HelpEntry{Usage: "[--editor <name>]", Description: "Open the workspace in an editor"},
+		Summary:     HelpEntry{Usage: "[name] [--editor <name>]", Description: "Open the active or named workspace in an editor"},
 		Help: []HelpEntry{
-			{Usage: "open [--editor <name>]", Description: "Open workspace (default: code, or WS_EDITOR)"},
+			{Usage: "open [name] [--editor <name>]", Description: "Open active workspace (or the named workspace)"},
 		},
-		complete: completeNoopCommand,
+		complete: completeOpenCommand,
+	},
+	{
+		Name:        CommandWorkspace,
+		Aliases:     []string{"workspaces"},
+		Category:    CategoryScope,
+		ShowInUsage: true,
+		Summary:     HelpEntry{Usage: "[subcommand]", Description: "Manage named VS Code workspaces"},
+		Help: []HelpEntry{
+			{Usage: "workspace", Description: "Show the active shell workspace and saved presets"},
+			{Usage: "workspace list", Description: "List saved workspaces (alias: ls)"},
+			{Usage: "workspace use <name>", Description: "Activate a named workspace in this shell"},
+			{Usage: "workspace clear", Description: "Return this shell to the default context"},
+		},
+		DetailedHelp: `Usage: ws workspace [subcommand] [options]
+
+Manage named workspace presets defined under workspaces: in manifest.yml.
+
+Subcommands:
+  (no subcommand)            Show the active shell workspace and saved presets
+  list|ls                    List saved workspaces
+  use <name>                 Prepare and activate a named workspace in this shell
+  clear|unset                Clear WS_WORKSPACE for this shell
+
+Activation is per shell. With shell integration loaded, ` + "`" + `ws workspace use <name>` + "`" + `
+updates WS_WORKSPACE automatically so commands like ` + "`" + `ws ll` + "`" + ` and ` + "`" + `ws open` + "`" + `
+default to that workspace's saved context.
+
+Alias: workspaces
+`,
+		complete: completeWorkspaceCommand,
 	},
 	{
 		Name:        CommandBrowse,
@@ -439,7 +470,7 @@ For each repo in the filter:
 Never removes or renames remotes. Use when the manifest gains new remotes
 after a repo was already cloned.
 `,
-		complete: completeNoopCommand,
+		complete: completeRemotesCommand,
 	},
 	{
 		Name:        CommandRepairRefspecs,
@@ -467,7 +498,7 @@ and reported for manual review.
 Legacy tool — intended to be removed in a future release once no one has
 affected checkouts.
 `,
-		complete: completeNoopCommand,
+		complete: completeRepairRefspecsCommand,
 	},
 	{
 		Name:        CommandAgent,
@@ -477,6 +508,7 @@ affected checkouts.
 		Help: []HelpEntry{
 			{Usage: "agent [--agent name] [repo] [-- args...]", Description: "Start an AI agent session"},
 			{Usage: "agent list [-v] [-l|-r] [-n N | --all] [filter]", Description: "List agent sessions (alias: ls)"},
+			{Usage: "agent search [--external] [-v] [-n N] <query>", Description: "Find sessions via an LLM search"},
 			{Usage: "agent resume <#|id>", Description: "Resume a previous agent session"},
 			{Usage: "agent pin [<#|id>]", Description: "Pin a session (no arg = current)"},
 			{Usage: "agent unpin [<#|id>]", Description: "Unpin a session (no arg = current)"},
@@ -489,6 +521,8 @@ Subcommands:
   (default)                          Start an agent session
   list|ls [-v] [-l|-r] [-n N|--all] [filter]
                                      List sessions
+  search [--external] [-v] [-n N] <query>
+                                     Find sessions via an LLM search
   resume <#|id>                      Resume a previous session
   pin [<#|id>]                       Pin a session (no arg = current)
   unpin [<#|id>]                     Unpin a session (no arg = current)
@@ -509,6 +543,17 @@ List options:
                          .         Current directory's repo (or root)
                          root      Only sessions started in the workspace root
                          external  Sessions started outside this workspace
+
+Search options:
+  --external           Include sessions started outside this workspace
+  -v, --verbose        Send last_prompt snippets to the searcher (more tokens)
+  -n <N>               Cap the number of results from the searcher (default: 10)
+
+  The searcher is an external LLM CLI. Your query plus a JSON catalog of
+  recent sessions is piped to its stdin. Resolution order:
+    1. $WS_AGENT_SEARCH_CMD environment variable
+    2. agents.search in manifest
+    3. ` + "`claude -p`" + ` (default)
 
 Resume / pin / unpin:
   <#>                  Numeric index from the most recent listing
@@ -532,6 +577,7 @@ original session and includes it in the resume command.
 
 Environment:
   WS_AGENT             Default agent profile name (overrides agents.default)
+  WS_AGENT_SEARCH_CMD  Searcher command for ws agent search (overrides agents.search)
 `,
 		complete: completeAgentCommand,
 	},

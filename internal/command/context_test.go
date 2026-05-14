@@ -144,16 +144,11 @@ repos:
 	assert.Contains(t, output, "Resolved: repo-a, repo-b")
 }
 
-func TestSetContext_UsesConfiguredScopeDirs(t *testing.T) {
+func TestSetContext_WritesScopeHint(t *testing.T) {
 	wsHome := t.TempDir()
 	m, err := parseManifestYAML(`
 root: repos
 workspace: ws.code-workspace
-scopes:
-  - dir: .scope
-    source: context
-  - dir: .all-repos
-    source: all
 remotes:
   origin: git@example.com:org
 repos:
@@ -168,11 +163,10 @@ repos:
 
 	require.NoError(t, SetContext(m, wsHome, "repo-a", false))
 
-	assertScopeEntriesInDir(t, wsHome, ".scope", "repo-a")
-	assertScopeEntriesInDir(t, wsHome, ".all-repos", "repo-a", "repo-b")
+	assertScopeEntries(t, wsHome, "repo-a")
 }
 
-func TestSetContext_CanDisableScopeDirs(t *testing.T) {
+func TestSetContext_WritesScopeHintEvenWhenLegacyScopesAreDisabled(t *testing.T) {
 	wsHome := t.TempDir()
 	m, err := parseManifestYAML(`
 root: repos
@@ -189,17 +183,14 @@ repos:
 
 	require.NoError(t, SetContext(m, wsHome, "repo-a", false))
 
-	assertNoScopeDir(t, wsHome, manifest.DefaultScopeDir)
+	assertScopeEntries(t, wsHome, "repo-a")
 }
 
-func TestSetContext_CustomScopesClearLegacyDefaultScope(t *testing.T) {
+func TestSetContext_ClearsLegacyDefaultScopeDir(t *testing.T) {
 	wsHome := t.TempDir()
 	m, err := parseManifestYAML(`
 root: repos
 workspace: ws.code-workspace
-scopes:
-  - dir: .scoped
-    source: context
 remotes:
   origin: git@example.com:org
 repos:
@@ -213,8 +204,9 @@ repos:
 
 	require.NoError(t, SetContext(m, wsHome, "repo-a", false))
 
-	assertScopeEntriesInDir(t, wsHome, ".scoped", "repo-a")
-	assertScopeEntriesInDir(t, wsHome, manifest.DefaultScopeDir)
+	entries, err := os.ReadDir(filepath.Join(wsHome, manifest.DefaultScopeDir))
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }
 
 func TestShowContext_PrintsResolvedRepos(t *testing.T) {

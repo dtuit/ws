@@ -42,7 +42,7 @@ func resolveBrowseTarget(m *manifest.Manifest, wsHome, arg string) (string, erro
 	}
 	index := buildPathIndex(m, wsHome, "", false)
 	name, ok := matchSessionRepo(cwd, index)
-	if !ok || name == agentRootRepoName {
+	if !ok || name == workspaceRootRepoName(wsHome) {
 		return "", fmt.Errorf("current directory is not inside a manifest repo")
 	}
 	return name, nil

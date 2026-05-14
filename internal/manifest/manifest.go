@@ -14,7 +14,8 @@ import (
 type Manifest struct {
 	Root          string              // directory where repos live, relative to manifest dir
 	Workspace     string              // VS Code workspace filename (default "ws.code-workspace")
-	Scopes        []ScopeDirConfig    // generated symlink directories for scoped repo views
+	Scopes        []ScopeDirConfig    // legacy scoped symlink config; retained for compatibility
+	Workspaces    map[string]string   // named workspace presets, name -> filter
 	Worktrees     bool                // default worktree expansion behavior for supported commands
 	WorktreeRoot  string              // directory for created worktrees (default ".worktrees")
 	Mux           MuxConfig           // terminal multiplexer configuration
@@ -26,6 +27,7 @@ type Manifest struct {
 	Agents        map[string]string // agent profile name → shell command
 	worktreesSet  bool
 	scopesSet     bool
+	workspacesSet bool
 	muxSet        bool
 }
 
@@ -207,6 +209,7 @@ type rawManifest struct {
 	Root         string               `yaml:"root"`          // where repos live
 	Workspace    string               `yaml:"workspace"`     // VS Code workspace filename
 	Scopes       *[]rawScopeDir       `yaml:"scopes"`        // generated scope symlink directories
+	Workspaces   map[string]string    `yaml:"workspaces"`    // named workspace presets
 	Worktrees    *bool                `yaml:"worktrees"`     // default worktree behavior
 	WorktreeRoot string               `yaml:"worktree_root"` // directory for created worktrees
 	Mux          *rawMuxConfig        `yaml:"mux"`           // terminal multiplexer config
@@ -276,6 +279,7 @@ func parse(data []byte, requireRoot bool) (*Manifest, error) {
 		Root:          raw.Root,
 		Workspace:     raw.Workspace,
 		Scopes:        defaultScopeDirs(),
+		Workspaces:    make(map[string]string),
 		Remotes:       make(map[string]string),
 		DefaultBranch: raw.Branch,
 		Groups:        raw.Groups,
@@ -297,6 +301,15 @@ func parse(data []byte, requireRoot bool) (*Manifest, error) {
 		}
 		m.Scopes = scopes
 		m.scopesSet = true
+	}
+	if raw.Workspaces != nil {
+		for name, filter := range raw.Workspaces {
+			if err := ValidateName(name); err != nil {
+				return nil, fmt.Errorf("workspace %q: %w", name, err)
+			}
+			m.Workspaces[name] = strings.TrimSpace(filter)
+		}
+		m.workspacesSet = true
 	}
 	if raw.Worktrees != nil {
 		m.Worktrees = *raw.Worktrees
@@ -505,6 +518,12 @@ func (m *Manifest) MergeLocal(path string) error {
 	if local.scopesSet {
 		m.Scopes = append([]ScopeDirConfig(nil), local.Scopes...)
 		m.scopesSet = true
+	}
+	if local.workspacesSet {
+		for name, filter := range local.Workspaces {
+			m.Workspaces[name] = filter
+		}
+		m.workspacesSet = true
 	}
 	if local.worktreesSet {
 		m.Worktrees = local.Worktrees

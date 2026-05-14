@@ -19,7 +19,7 @@ import (
 type AgentSession struct {
 	Agent            string    // "claude", "codex"
 	SessionID        string    // agent-specific session identifier
-	Repo             string    // repo name or "(root)" for workspace root
+	Repo             string    // repo name; workspace-root sessions use the workspace basename
 	Dir              string    // absolute path where the session was started
 	StartedAt        time.Time // first activity
 	LastActive       time.Time // most recent activity
@@ -43,8 +43,19 @@ const (
 	agentFilterCwd      = "."        // current directory
 	agentFilterRoot     = "root"     // workspace root sessions only
 	agentFilterExternal = "external" // sessions outside the workspace
-	agentRootRepoName   = "(root)"
 )
+
+// workspaceRootRepoName returns the label used in the REPO column for
+// sessions started at the workspace root. Defaults to the workspace
+// directory's basename so listings stay informative; falls back to
+// "workspace" if wsHome is empty / "/" / ".".
+func workspaceRootRepoName(wsHome string) string {
+	base := filepath.Base(wsHome)
+	if base == "" || base == "." || base == "/" {
+		return "workspace"
+	}
+	return base
+}
 
 // AgentListMode controls optional agent list output extensions.
 type AgentListMode struct {
@@ -79,7 +90,7 @@ func AgentList(m *manifest.Manifest, wsHome, filter string, includeWorktrees boo
 
 	// Post-filter for special tokens that buildPathIndex can't express
 	if filter == agentFilterRoot {
-		sessions = filterSessionsByRepo(sessions, agentRootRepoName)
+		sessions = filterSessionsByRepo(sessions, workspaceRootRepoName(wsHome))
 	}
 
 	if len(sessions) == 0 {
@@ -93,6 +104,8 @@ func AgentList(m *manifest.Manifest, wsHome, filter string, includeWorktrees boo
 	if limit > 0 && len(sessions) > limit {
 		sessions = truncatePreservingPins(sessions, limit)
 	}
+
+	enrichSessionNames(sessions)
 
 	if mode.needsEnrichment() {
 		enrichSessionVerboseInfo(sessions)
@@ -111,6 +124,11 @@ func AgentResume(m *manifest.Manifest, wsHome string, indexOrID string) error {
 	if len(sessions) == 0 {
 		return fmt.Errorf("no agent sessions found in this workspace")
 	}
+
+	// Names aren't populated by discovery for non-live sessions, so we
+	// need to enrich before resolving — otherwise `resume <name>` only
+	// finds sessions whose agent process is still running.
+	enrichSessionNames(sessions)
 
 	session, err := resolveSessionRef(sessions, indexOrID)
 	if err != nil {
@@ -189,6 +207,7 @@ func resolvePinTarget(m *manifest.Manifest, wsHome, ref string) (string, string,
 	}
 	pins, _ := loadAgentPins(wsHome)
 	sessions = applyAgentPins(sessions, pins)
+	enrichSessionNames(sessions)
 
 	session, err := resolveSessionRef(sessions, ref)
 	if err != nil {
@@ -317,13 +336,13 @@ func buildPathIndex(m *manifest.Manifest, wsHome, filter string, includeWorktree
 	index := make(map[string]string)
 
 	if filter == agentFilterRoot {
-		index[wsHome] = agentRootRepoName
+		index[wsHome] = workspaceRootRepoName(wsHome)
 		return index
 	}
 
 	var repos []manifest.RepoInfo
 	if filter == "" {
-		index[wsHome] = agentRootRepoName
+		index[wsHome] = workspaceRootRepoName(wsHome)
 		repos = m.AllRepos(wsHome)
 	} else {
 		var err error
@@ -385,7 +404,7 @@ func resolveAgentListFilter(m *manifest.Manifest, wsHome, filter string) (string
 		return "", fmt.Errorf("current directory is not inside the workspace (%s)", wsHome)
 	}
 
-	if name == agentRootRepoName {
+	if name == workspaceRootRepoName(wsHome) {
 		return agentFilterRoot, nil
 	}
 	return name, nil
@@ -468,6 +487,31 @@ func filterSessionsByRepo(sessions []AgentSession, repoName string) []AgentSessi
 	return filtered
 }
 
+// enrichSessionNames fills in Name for displayed sessions whose live
+// metadata file no longer exists by scanning their conversation
+// transcript for the most recent /rename event. The transcript persists
+// after the agent process exits, while ~/.claude/sessions/<pid>.json
+// does not.
+func enrichSessionNames(sessions []AgentSession) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	claudeDir := filepath.Join(home, ".claude")
+
+	for i := range sessions {
+		if sessions[i].Name != "" {
+			continue
+		}
+		switch sessions[i].Agent {
+		case agentClaude:
+			if name, ok := readClaudeNameFromTranscript(claudeDir, sessions[i].Dir, sessions[i].SessionID); ok {
+				sessions[i].Name = name
+			}
+		}
+	}
+}
+
 func enrichSessionVerboseInfo(sessions []AgentSession) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -508,6 +552,42 @@ func resolveSessionRef(sessions []AgentSession, ref string) (AgentSession, error
 			return AgentSession{}, fmt.Errorf("index %d out of range (1-%d)", idx, len(sessions))
 		}
 		return sessions[idx-1], nil
+	}
+
+	// Try as session name (case-insensitive). Exact match wins; if none,
+	// fall back to prefix. Name lookup is checked before session-ID prefix
+	// so a short name doesn't get shadowed by a coincidental hex prefix.
+	if ref != "" {
+		refLower := strings.ToLower(ref)
+		var exact, prefix []AgentSession
+		for _, s := range sessions {
+			if s.Name == "" {
+				continue
+			}
+			nameLower := strings.ToLower(s.Name)
+			switch {
+			case nameLower == refLower:
+				exact = append(exact, s)
+			case strings.HasPrefix(nameLower, refLower):
+				prefix = append(prefix, s)
+			}
+		}
+		nameMatches := exact
+		if len(nameMatches) == 0 {
+			nameMatches = prefix
+		}
+		switch len(nameMatches) {
+		case 1:
+			return nameMatches[0], nil
+		case 0:
+			// fall through to session-ID prefix matching
+		default:
+			var labels []string
+			for _, s := range nameMatches {
+				labels = append(labels, fmt.Sprintf("%s (%s)", s.Name, shortSessionID(s.SessionID)))
+			}
+			return AgentSession{}, fmt.Errorf("ambiguous name %q, matches: %s", ref, strings.Join(labels, ", "))
+		}
 	}
 
 	// Try as session ID prefix

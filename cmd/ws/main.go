@@ -99,6 +99,23 @@ dispatch:
 	defaultWorktrees := m.Worktrees
 
 	switch cmd {
+	case command.CommandWorkspace:
+		parsed, err := parseWorkspaceArgs(args)
+		if err != nil {
+			fatal(err)
+		}
+		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees)
+		switch parsed.Action {
+		case "show", "list":
+			command.WorkspaceList(m, wsHome)
+		case "use":
+			if err := command.WorkspaceUse(m, wsHome, parsed.Name, includeWorktrees); err != nil {
+				fatal(err)
+			}
+		case "clear":
+			command.WorkspaceClear()
+		}
+
 	case command.CommandContext:
 		parsed, err := parseContextArgs(args)
 		if err != nil {
@@ -219,10 +236,15 @@ dispatch:
 
 	case command.CommandOpen:
 		editor, args := parseEditorFlag(args)
-		if len(args) > 0 {
-			fatal(fmt.Errorf("usage: ws open [--editor <name>]"))
+		includeWorktrees := resolveWorktreesOverride(defaultWorktrees, globalWorktrees)
+		if len(args) > 1 {
+			fatal(fmt.Errorf("usage: ws open [name] [--editor <name>]"))
 		}
-		if err := command.Open(m, wsHome, command.ResolveEditor(editor)); err != nil {
+		workspaceName := ""
+		if len(args) == 1 {
+			workspaceName = args[0]
+		}
+		if err := command.OpenWorkspace(m, wsHome, workspaceName, command.ResolveEditor(editor), includeWorktrees); err != nil {
 			fatal(err)
 		}
 
@@ -351,6 +373,15 @@ dispatch:
 			}
 		case "resume":
 			if err := command.AgentResume(m, wsHome, parsed.IndexOrID); err != nil {
+				fatal(err)
+			}
+		case "search":
+			opts := command.AgentSearchOptions{
+				External:   parsed.External,
+				Verbose:    parsed.Verbose,
+				MaxResults: parsed.Limit,
+			}
+			if err := command.AgentSearch(m, wsHome, parsed.Query, opts); err != nil {
 				fatal(err)
 			}
 		case "pin":
