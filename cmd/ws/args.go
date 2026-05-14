@@ -281,7 +281,7 @@ type agentArgs struct {
 	Action      string   // "start", "ls", "resume", "search"
 	Repo        string   // target repo (for start)
 	Agent       string   // agent profile name (--agent)
-	IndexOrID   string   // for resume: numeric index or session ID prefix
+	IndexOrID   string   // for resume: numeric index, session name (prefix), or session ID prefix
 	Filter      string   // for ls: filter expression
 	Limit       int      // for ls: max sessions (0 = default)
 	ShowAll     bool     // for ls: show all sessions
@@ -318,7 +318,7 @@ func parseAgentArgs(args []string) (agentArgs, error) {
 		return parseAgentSearchArgs(wsArgs[1:])
 	case "resume":
 		if len(wsArgs) != 2 {
-			return agentArgs{}, fmt.Errorf("usage: ws agent resume <#|session-id>")
+			return agentArgs{}, fmt.Errorf("usage: ws agent resume <#|name|session-id>")
 		}
 		return agentArgs{Action: "resume", IndexOrID: wsArgs[1]}, nil
 	case "pin", "unpin":
