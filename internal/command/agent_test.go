@@ -232,6 +232,27 @@ func TestParseRenameArgs(t *testing.T) {
 	}
 }
 
+func TestClaudeProjectDirName(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"/home/u/repo", "-home-u-repo"},
+		// Underscores in the path collapse to hyphens — this is what was
+		// breaking discovery for repos like sdm_smartocr_db.
+		{"/home/u/sdm_smartocr_db", "-home-u-sdm-smartocr-db"},
+		// Dots collapse too; a leading dot becomes a leading hyphen, which
+		// is why .worktrees ends up rendered as `--worktrees`.
+		{"/home/u/repo/.worktrees/x", "-home-u-repo--worktrees-x"},
+		// Hyphens and digits pass through unchanged.
+		{"/home/u/oss-multica-1", "-home-u-oss-multica-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, claudeProjectDirName(tc.in))
+		})
+	}
+}
+
 func TestReadClaudeNameFromTranscript(t *testing.T) {
 	claudeDir := t.TempDir()
 	projectPath := "/home/u/repo"
@@ -349,6 +370,74 @@ func TestResolveSessionRef_NoMatch(t *testing.T) {
 
 	_, err := resolveSessionRef(sessions, "xyz")
 	assert.Error(t, err)
+}
+
+func TestResolveSessionRef_ByName(t *testing.T) {
+	sessions := []AgentSession{
+		{SessionID: "aaa111", Name: "Dragonfly"},
+		{SessionID: "bbb222", Name: "search-fix"},
+		{SessionID: "ccc333"},
+	}
+
+	// Exact, case-insensitive match.
+	s, err := resolveSessionRef(sessions, "dragonfly")
+	require.NoError(t, err)
+	assert.Equal(t, "aaa111", s.SessionID)
+
+	// Prefix match.
+	s, err = resolveSessionRef(sessions, "search")
+	require.NoError(t, err)
+	assert.Equal(t, "bbb222", s.SessionID)
+}
+
+func TestResolveSessionRef_NameBeatsIDPrefix(t *testing.T) {
+	// "ccc" is both a name and the prefix of another session's ID — the
+	// name match should win so users typing a name aren't shadowed by a
+	// coincidental hex prefix.
+	sessions := []AgentSession{
+		{SessionID: "ccc111"},
+		{SessionID: "ddd222", Name: "ccc"},
+	}
+
+	s, err := resolveSessionRef(sessions, "ccc")
+	require.NoError(t, err)
+	assert.Equal(t, "ddd222", s.SessionID)
+}
+
+func TestResolveSessionRef_ExactNameBeatsPrefix(t *testing.T) {
+	// "foo" is an exact name for one session and a prefix for another —
+	// the exact match wins instead of erroring as ambiguous.
+	sessions := []AgentSession{
+		{SessionID: "aaa", Name: "foo"},
+		{SessionID: "bbb", Name: "foobar"},
+	}
+
+	s, err := resolveSessionRef(sessions, "foo")
+	require.NoError(t, err)
+	assert.Equal(t, "aaa", s.SessionID)
+}
+
+func TestResolveSessionRef_AmbiguousName(t *testing.T) {
+	sessions := []AgentSession{
+		{SessionID: "aaa", Name: "demo"},
+		{SessionID: "bbb", Name: "demo"},
+	}
+
+	_, err := resolveSessionRef(sessions, "demo")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous")
+}
+
+func TestResolveSessionRef_NameMissFallsBackToIDPrefix(t *testing.T) {
+	sessions := []AgentSession{
+		{SessionID: "abc123", Name: "rocket"},
+		{SessionID: "xyz789", Name: "balloon"},
+	}
+
+	// "abc" doesn't match any name; the ID prefix path should still work.
+	s, err := resolveSessionRef(sessions, "abc")
+	require.NoError(t, err)
+	assert.Equal(t, "abc123", s.SessionID)
 }
 
 func TestResolveAgentCmd_FromManifest(t *testing.T) {

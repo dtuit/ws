@@ -125,6 +125,11 @@ func AgentResume(m *manifest.Manifest, wsHome string, indexOrID string) error {
 		return fmt.Errorf("no agent sessions found in this workspace")
 	}
 
+	// Names aren't populated by discovery for non-live sessions, so we
+	// need to enrich before resolving — otherwise `resume <name>` only
+	// finds sessions whose agent process is still running.
+	enrichSessionNames(sessions)
+
 	session, err := resolveSessionRef(sessions, indexOrID)
 	if err != nil {
 		return err
@@ -202,6 +207,7 @@ func resolvePinTarget(m *manifest.Manifest, wsHome, ref string) (string, string,
 	}
 	pins, _ := loadAgentPins(wsHome)
 	sessions = applyAgentPins(sessions, pins)
+	enrichSessionNames(sessions)
 
 	session, err := resolveSessionRef(sessions, ref)
 	if err != nil {
@@ -546,6 +552,42 @@ func resolveSessionRef(sessions []AgentSession, ref string) (AgentSession, error
 			return AgentSession{}, fmt.Errorf("index %d out of range (1-%d)", idx, len(sessions))
 		}
 		return sessions[idx-1], nil
+	}
+
+	// Try as session name (case-insensitive). Exact match wins; if none,
+	// fall back to prefix. Name lookup is checked before session-ID prefix
+	// so a short name doesn't get shadowed by a coincidental hex prefix.
+	if ref != "" {
+		refLower := strings.ToLower(ref)
+		var exact, prefix []AgentSession
+		for _, s := range sessions {
+			if s.Name == "" {
+				continue
+			}
+			nameLower := strings.ToLower(s.Name)
+			switch {
+			case nameLower == refLower:
+				exact = append(exact, s)
+			case strings.HasPrefix(nameLower, refLower):
+				prefix = append(prefix, s)
+			}
+		}
+		nameMatches := exact
+		if len(nameMatches) == 0 {
+			nameMatches = prefix
+		}
+		switch len(nameMatches) {
+		case 1:
+			return nameMatches[0], nil
+		case 0:
+			// fall through to session-ID prefix matching
+		default:
+			var labels []string
+			for _, s := range nameMatches {
+				labels = append(labels, fmt.Sprintf("%s (%s)", s.Name, shortSessionID(s.SessionID)))
+			}
+			return AgentSession{}, fmt.Errorf("ambiguous name %q, matches: %s", ref, strings.Join(labels, ", "))
+		}
 	}
 
 	// Try as session ID prefix
